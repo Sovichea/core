@@ -302,6 +302,7 @@ add_library(PdfFile SHARED
     SrcWriter/ICCProfile.h
     SrcWriter/Image.h
     SrcWriter/Info.h
+    SrcWriter/LogicalText.h
     SrcWriter/Metadata.h
     SrcWriter/Objects.h
     SrcWriter/Outline.h
@@ -332,6 +333,7 @@ add_library(PdfFile SHARED
     SrcWriter/GState.cpp
     SrcWriter/Image.cpp
     SrcWriter/Info.cpp
+    SrcWriter/LogicalText.cpp
     SrcWriter/Metadata.cpp
     SrcWriter/Objects.cpp
     SrcWriter/Outline.cpp
