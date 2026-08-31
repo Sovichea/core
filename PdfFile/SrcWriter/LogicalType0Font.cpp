@@ -195,7 +195,8 @@ namespace PdfWriter
 	bool TryBuildLogicalType0Font(const std::vector<std::uint8_t>& source,
 	                                  const CLogicalFontShard& shard,
 	                                  CLogicalType0FontResult& result,
-	                                  CLogicalType0FontError& error)
+	                                  CLogicalType0FontError& error,
+	                                  const std::string& fontName)
 	{
 		error = CLogicalType0FontError();
 		std::vector<const CLogicalCidRecord*> records;
@@ -204,7 +205,7 @@ namespace PdfWriter
 
 		CLogicalTrueTypeSubsetResult subset;
 		CLogicalTrueTypeSubsetError subsetError;
-		if (!TryBuildLogicalTrueType(source, shard, subset, subsetError))
+		if (!TryBuildLogicalTrueType(source, shard, subset, subsetError, fontName))
 		{
 			error.SubsetError = subsetError;
 			return SetError(error, CLogicalType0FontErrorCode::SubsetBuildFailed,

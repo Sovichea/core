@@ -120,7 +120,8 @@ namespace PdfWriter
 	bool TryBuildLogicalTrueType(const std::vector<std::uint8_t>& source,
 	                             const CLogicalFontShard& shard,
 	                             CLogicalTrueTypeSubsetResult& result,
-	                             CLogicalTrueTypeSubsetError& error);
+	                             CLogicalTrueTypeSubsetError& error,
+	                             const std::string& fontName = std::string());
 
 	bool TryGetTrueTypeGlyphAdvance(const std::vector<std::uint8_t>& fontData,
 	                                std::uint32_t glyphId,

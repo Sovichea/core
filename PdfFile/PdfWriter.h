@@ -38,6 +38,7 @@
 #include "../../DesktopEditor/xmlsec/src/include/Certificate.h"
 #include "SrcWriter/States.h"
 #include "SrcWriter/Annotation.h"
+#include "LogicalTextMetrics.h"
 
 namespace PdfWriter
 {
@@ -67,6 +68,7 @@ public:
 	int          SaveToFile(const std::wstring& wsPath);
 	int          SaveToMemory(BYTE** pData, int* pLength);
 	const std::string& GetLastLogicalTextDiagnostic() const;
+	CLogicalTextMetrics GetLogicalTextMetrics() const;
 	void         SetPassword(const std::wstring& wsPassword);
 	void         SetDocumentID(const std::wstring& wsDocumentID);
 	void         SetDocumentInfo(const std::wstring& wsTitle, const std::wstring& wsCreator, const std::wstring& wsSubject, const std::wstring& wsKeywords);
@@ -260,6 +262,7 @@ private:
 	void Reset();
 	bool IsValid();
 	bool IsPageValid();
+	bool FinalizeLogicalFonts();
 	void SetError();
 	void AddLink(PdfWriter::CPage* pPage, const double& dX, const double& dY, const double& dW, const double& dH, const double& dDestX, const double& dDestY, const unsigned int& unDestPage);
 	unsigned char* EncodeString(const unsigned int* pUnicodes, const unsigned int& unUnicodesCount, const unsigned int* pGIDs = NULL);

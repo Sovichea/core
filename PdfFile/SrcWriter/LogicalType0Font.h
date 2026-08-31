@@ -82,7 +82,8 @@ namespace PdfWriter
 	bool TryBuildLogicalType0Font(const std::vector<std::uint8_t>& source,
 	                              const CLogicalFontShard& shard,
 	                              CLogicalType0FontResult& result,
-	                              CLogicalType0FontError& error);
+	                              CLogicalType0FontError& error,
+	                              const std::string& fontName = std::string());
 }
 
 #endif

@@ -618,6 +618,10 @@ std::string CPdfFile::GetLastLogicalTextDiagnostic() const
 		return "PDF writer is not initialized";
 	return m_pInternal->pWriter->GetLastLogicalTextDiagnostic();
 }
+CLogicalTextMetrics CPdfFile::GetLogicalTextMetrics() const
+{
+	return m_pInternal->pWriter ? m_pInternal->pWriter->GetLogicalTextMetrics() : CLogicalTextMetrics();
+}
 void CPdfFile::SetPassword(const std::wstring& wsPassword)
 {
 	if (m_pInternal->pWriter)

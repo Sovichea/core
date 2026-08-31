@@ -792,6 +792,33 @@ namespace PdfWriter
 			return cmap;
 		}
 
+		std::vector<std::uint8_t> BuildNameTable(const std::string& fontName)
+		{
+			const std::array<std::pair<std::uint16_t, std::string>, 3> names = {{
+				{1, "Logical"}, {4, fontName}, {6, fontName}}};
+			std::vector<std::uint8_t> table;
+			AppendU16(table, 0);
+			AppendU16(table, static_cast<std::uint16_t>(names.size()));
+			AppendU16(table, static_cast<std::uint16_t>(6 + names.size() * 12));
+			std::vector<std::uint8_t> storage;
+			for (const auto& name : names)
+			{
+				AppendU16(table, 3);
+				AppendU16(table, 1);
+				AppendU16(table, 0x0409);
+				AppendU16(table, name.first);
+				AppendU16(table, static_cast<std::uint16_t>(name.second.size() * 2));
+				AppendU16(table, static_cast<std::uint16_t>(storage.size()));
+				for (unsigned char character : name.second)
+				{
+					storage.push_back(0);
+					storage.push_back(character);
+				}
+			}
+			table.insert(table.end(), storage.begin(), storage.end());
+			return table;
+		}
+
 		bool EmitFont(std::uint32_t flavor,
 		              std::vector<COutputTable>& tables,
 		              std::vector<std::uint8_t>& output,
@@ -964,6 +991,7 @@ namespace PdfWriter
 	bool TryBuildLogicalTrueTypeImpl(const std::vector<std::uint8_t>& source,
 	                                 const CLogicalFontShard& shard,
 	                                 bool allowSynthetic,
+	                                 const std::string& fontName,
 	                                 CLogicalTrueTypeSubsetResult& result,
 	                                 CLogicalTrueTypeSubsetError& error)
 	{
@@ -1247,9 +1275,21 @@ namespace PdfWriter
 		tables.push_back({TagMaxp, std::move(maxp)});
 		tables.push_back({TagPost, std::move(post)});
 
-		const std::array<std::uint32_t, 6> safeTables = {
-			MakeTag('n', 'a', 'm', 'e'), MakeTag('O', 'S', '/', '2'), MakeTag('c', 'v', 't', ' '),
-			MakeTag('f', 'p', 'g', 'm'), MakeTag('p', 'r', 'e', 'p'), MakeTag('g', 'a', 's', 'p')};
+		const std::uint32_t nameTag = MakeTag('n', 'a', 'm', 'e');
+		if (fontName.empty())
+		{
+			const auto found = font.Tables.find(nameTag);
+			if (found != font.Tables.end())
+				tables.push_back({nameTag, CopyTable(source, found->second)});
+		}
+		else
+		{
+			tables.push_back({nameTag, BuildNameTable(fontName)});
+		}
+
+		const std::array<std::uint32_t, 5> safeTables = {
+			MakeTag('O', 'S', '/', '2'), MakeTag('c', 'v', 't', ' '), MakeTag('f', 'p', 'g', 'm'),
+			MakeTag('p', 'r', 'e', 'p'), MakeTag('g', 'a', 's', 'p')};
 		for (std::uint32_t tag : safeTables)
 		{
 			const auto found = font.Tables.find(tag);
@@ -1270,15 +1310,16 @@ namespace PdfWriter
 	                                         CLogicalTrueTypeSubsetResult& result,
 	                                         CLogicalTrueTypeSubsetError& error)
 	{
-		return TryBuildLogicalTrueTypeImpl(source, shard, false, result, error);
+		return TryBuildLogicalTrueTypeImpl(source, shard, false, std::string(), result, error);
 	}
 
 	bool TryBuildLogicalTrueType(const std::vector<std::uint8_t>& source,
 	                             const CLogicalFontShard& shard,
 	                             CLogicalTrueTypeSubsetResult& result,
-	                             CLogicalTrueTypeSubsetError& error)
+	                             CLogicalTrueTypeSubsetError& error,
+	                             const std::string& fontName)
 	{
-		return TryBuildLogicalTrueTypeImpl(source, shard, true, result, error);
+		return TryBuildLogicalTrueTypeImpl(source, shard, true, fontName, result, error);
 	}
 
 	bool TryGetTrueTypeGlyphAdvance(const std::vector<std::uint8_t>& fontData,

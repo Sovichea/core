@@ -231,70 +231,118 @@ namespace PdfWriter
 	                                 const CLogicalType0FontResult& result,
 	                                 const std::string& fontName,
 	                                 const CLogicalPdfFontDescriptorMetrics& metrics)
-		: CFontDict(pXref, pDocument), m_widths(result.Widths)
+		: CFontDict(pXref, pDocument), m_fontName(fontName), m_widths(result.Widths)
 	{
 		Add("Type", CLogicalType0FontResult::FontType);
 		Add("Subtype", CLogicalType0FontResult::FontSubtype);
 		Add("BaseFont", fontName.c_str());
 		Add("Encoding", CLogicalType0FontResult::Encoding);
 
-		CDictObject* descendant = new CDictObject();
-		pXref->Add(descendant);
-		descendant->Add("Type", "Font");
-		descendant->Add("Subtype", CLogicalType0FontResult::DescendantFontSubtype);
-		descendant->Add("BaseFont", fontName.c_str());
-		descendant->Add("DW", 1000);
+		m_descendant = new CDictObject();
+		pXref->Add(m_descendant);
+		m_descendant->Add("Type", "Font");
+		m_descendant->Add("Subtype", CLogicalType0FontResult::DescendantFontSubtype);
+		m_descendant->Add("BaseFont", fontName.c_str());
+		m_descendant->Add("DW", 1000);
 
 		CDictObject* cidSystemInfo = new CDictObject();
 		cidSystemInfo->Add("Registry", new CStringObject("Adobe"));
 		cidSystemInfo->Add("Ordering", new CStringObject("Identity"));
 		cidSystemInfo->Add("Supplement", 0);
-		descendant->Add("CIDSystemInfo", cidSystemInfo);
+		m_descendant->Add("CIDSystemInfo", cidSystemInfo);
+		UpdateWidthsDictionary();
 
-		if (result.Widths.size() > 1)
-		{
-			CArrayObject* widths = new CArrayObject();
-			widths->Add(1);
-			CArrayObject* consecutiveWidths = new CArrayObject();
-			for (std::size_t cid = 1; cid < result.Widths.size(); ++cid)
-				consecutiveWidths->Add(result.Widths[cid]);
-			widths->Add(consecutiveWidths);
-			descendant->Add("W", widths);
-		}
-
-		CDictObject* descriptor = new CDictObject();
-		pXref->Add(descriptor);
-		descriptor->Add("Type", "FontDescriptor");
-		descriptor->Add("FontName", fontName.c_str());
-		descriptor->Add("Flags", metrics.Flags);
+		m_descriptor = new CDictObject();
+		pXref->Add(m_descriptor);
+		m_descriptor->Add("Type", "FontDescriptor");
+		m_descriptor->Add("FontName", fontName.c_str());
+		m_descriptor->Add("Flags", metrics.Flags);
 		CArrayObject* bbox = new CArrayObject();
 		for (int value : metrics.BBox)
 			bbox->Add(value);
-		descriptor->Add("FontBBox", bbox);
-		descriptor->Add("ItalicAngle", metrics.ItalicAngle);
-		descriptor->Add("Ascent", metrics.Ascent);
-		descriptor->Add("Descent", metrics.Descent);
-		descriptor->Add("CapHeight", metrics.CapHeight);
-		descriptor->Add("StemV", metrics.StemV);
-		descriptor->Add("FontWeight", metrics.FontWeight);
+		m_descriptor->Add("FontBBox", bbox);
+		m_descriptor->Add("ItalicAngle", metrics.ItalicAngle);
+		m_descriptor->Add("Ascent", metrics.Ascent);
+		m_descriptor->Add("Descent", metrics.Descent);
+		m_descriptor->Add("CapHeight", metrics.CapHeight);
+		m_descriptor->Add("StemV", metrics.StemV);
+		m_descriptor->Add("FontWeight", metrics.FontWeight);
 
-		CDictObject* fontFile = new CDictObject(pXref);
-		fontFile->Add("Length1", static_cast<unsigned int>(result.FontFile2.size()));
-		WriteBytes(fontFile, result.FontFile2.data(), result.FontFile2.size());
-		descriptor->Add("FontFile2", fontFile);
-		descendant->Add("FontDescriptor", descriptor);
+		m_fontFile = new CDictObject(pXref);
+		m_fontFile->Add("Length1", static_cast<unsigned int>(result.FontFile2.size()));
+		WriteBytes(m_fontFile, result.FontFile2.data(), result.FontFile2.size());
+		m_descriptor->Add("FontFile2", m_fontFile);
+		m_descendant->Add("FontDescriptor", m_descriptor);
 
-		CDictObject* cidToGid = new CDictObject(pXref);
-		WriteBytes(cidToGid, result.CIDToGIDMap.data(), result.CIDToGIDMap.size());
-		descendant->Add("CIDToGIDMap", cidToGid);
+		m_cidToGid = new CDictObject(pXref);
+		WriteBytes(m_cidToGid, result.CIDToGIDMap.data(), result.CIDToGIDMap.size());
+		m_descendant->Add("CIDToGIDMap", m_cidToGid);
 
 		CArrayObject* descendants = new CArrayObject();
-		descendants->Add(descendant);
+		descendants->Add(m_descendant);
 		Add("DescendantFonts", descendants);
 
-		CDictObject* toUnicode = new CDictObject(pXref);
-		WriteBytes(toUnicode, reinterpret_cast<const std::uint8_t*>(result.ToUnicode.data()), result.ToUnicode.size());
-		Add("ToUnicode", toUnicode);
+		m_toUnicode = new CDictObject(pXref);
+		WriteBytes(m_toUnicode, reinterpret_cast<const std::uint8_t*>(result.ToUnicode.data()), result.ToUnicode.size());
+		Add("ToUnicode", m_toUnicode);
+	}
+
+	void CLogicalPdfFont::UpdateWidthsDictionary()
+	{
+		m_descendant->Remove("W");
+		if (m_widths.size() <= 1)
+			return;
+		CArrayObject* widths = new CArrayObject();
+		widths->Add(1);
+		CArrayObject* consecutiveWidths = new CArrayObject();
+		for (std::size_t cid = 1; cid < m_widths.size(); ++cid)
+			consecutiveWidths->Add(m_widths[cid]);
+		widths->Add(consecutiveWidths);
+		m_descendant->Add("W", widths);
+	}
+
+	void CLogicalPdfFont::SetWidth(unsigned short code, int width)
+	{
+		if (m_widths.size() <= code)
+			m_widths.resize(static_cast<std::size_t>(code) + 1, 0);
+		m_widths[code] = width;
+	}
+
+	void CLogicalPdfFont::SetWidths(const std::vector<int>& widths)
+	{
+		m_widths = widths;
+		UpdateWidthsDictionary();
+	}
+
+	bool CLogicalPdfFont::Update(const CLogicalType0FontResult& result, std::string* error)
+	{
+		if (error)
+			error->clear();
+		CLogicalPdfFontDescriptorMetrics metrics;
+		if (!ValidateResult(result, m_fontName, metrics, error))
+			return false;
+
+		SetWidths(result.Widths);
+		m_descriptor->Add("Flags", metrics.Flags);
+		CArrayObject* bbox = new CArrayObject();
+		for (int value : metrics.BBox)
+			bbox->Add(value);
+		m_descriptor->Add("FontBBox", bbox);
+		m_descriptor->Add("ItalicAngle", metrics.ItalicAngle);
+		m_descriptor->Add("Ascent", metrics.Ascent);
+		m_descriptor->Add("Descent", metrics.Descent);
+		m_descriptor->Add("CapHeight", metrics.CapHeight);
+		m_descriptor->Add("StemV", metrics.StemV);
+		m_descriptor->Add("FontWeight", metrics.FontWeight);
+
+		m_fontFile->Add("Length1", static_cast<unsigned int>(result.FontFile2.size()));
+		m_fontFile->GetStream()->Clear();
+		WriteBytes(m_fontFile, result.FontFile2.data(), result.FontFile2.size());
+		m_cidToGid->GetStream()->Clear();
+		WriteBytes(m_cidToGid, result.CIDToGIDMap.data(), result.CIDToGIDMap.size());
+		m_toUnicode->GetStream()->Clear();
+		WriteBytes(m_toUnicode, reinterpret_cast<const std::uint8_t*>(result.ToUnicode.data()), result.ToUnicode.size());
+		return true;
 	}
 
 	unsigned int CLogicalPdfFont::GetWidth(unsigned short code)

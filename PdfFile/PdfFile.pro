@@ -217,6 +217,7 @@ SOURCES += \
 
 HEADERS += PdfFile.h \
            PdfWriter.h \
+           LogicalTextMetrics.h \
            PdfReader.h \
            PdfEditor.h \
            OnlineOfficeBinToPdf.h

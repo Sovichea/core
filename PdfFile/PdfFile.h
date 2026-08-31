@@ -36,6 +36,7 @@
 #include "../DesktopEditor/graphics/pro/Image.h"
 #include "../DesktopEditor/graphics/pro/officedrawingfile.h"
 #include "../DesktopEditor/xmlsec/src/include/Certificate.h"
+#include "LogicalTextMetrics.h"
 
 class CPdfFile_Private;
 class CConvertFromBinParams
@@ -159,6 +160,7 @@ public:
 	void CreatePdf    (bool isPDFA = false);
 	int  SaveToFile   (const std::wstring& wsPath);
 	std::string GetLastLogicalTextDiagnostic() const;
+	CLogicalTextMetrics GetLogicalTextMetrics() const;
 	void RotatePage   (int nRotate);
 	void SetPassword  (const std::wstring& wsPassword);
 	void SetDocumentID(const std::wstring& wsDocumentID);

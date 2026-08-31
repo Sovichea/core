@@ -362,6 +362,7 @@ add_library(PdfFile SHARED
 
     PdfFile.h
     PdfWriter.h
+    LogicalTextMetrics.h
     PdfReader.h
     PdfEditor.h
     OnlineOfficeBinToPdf.h

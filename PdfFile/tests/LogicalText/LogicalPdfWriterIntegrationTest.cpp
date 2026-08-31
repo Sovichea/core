@@ -35,6 +35,18 @@ namespace
 		const std::vector<std::uint8_t> bytes = ReadBytes(path);
 		return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 	}
+
+	std::size_t CountOccurrences(const std::string& text, const std::string& value)
+	{
+		std::size_t count = 0;
+		std::size_t offset = 0;
+		while ((offset = text.find(value, offset)) != std::string::npos)
+		{
+			++count;
+			offset += value.size();
+		}
+		return count;
+	}
 }
 
 TEST(LogicalPdfWriterIntegration, WritesLogicalType0FontThroughProductionRenderer)
@@ -83,7 +95,14 @@ TEST(LogicalPdfWriterIntegration, WritesLogicalType0FontThroughProductionRendere
 		ASSERT_EQ(S_OK, pdf.CommandDrawTextLogicalUnit(fallbackUnit));
 		EXPECT_NE(std::string::npos,
 		          pdf.GetLastLogicalTextDiagnostic().find("active text state is unsupported"));
+		CLogicalTextMetrics metrics = pdf.GetLogicalTextMetrics();
+		EXPECT_EQ(2u, metrics.UnitsReceived);
+		EXPECT_EQ(1u, metrics.LogicalUnits);
+		EXPECT_EQ(1u, metrics.FallbackUnits);
 		ASSERT_EQ(0, pdf.SaveToFile(Widen(outputPath)));
+		metrics = pdf.GetLogicalTextMetrics();
+		EXPECT_EQ(1u, metrics.FontPublications);
+		EXPECT_GT(metrics.FinalEmbeddedFontBytes, 0u);
 	}
 	RELEASEINTERFACE(fonts);
 
@@ -94,5 +113,132 @@ TEST(LogicalPdfWriterIntegration, WritesLogicalType0FontThroughProductionRendere
 	EXPECT_NE(std::string::npos, pdf.find("/Subtype /CIDFontType2"));
 	EXPECT_NE(std::string::npos, pdf.find("/CIDToGIDMap"));
 	EXPECT_NE(std::string::npos, pdf.find("/ToUnicode"));
+	EXPECT_EQ(std::string::npos, pdf.find("/BaseFont /Helvetica"));
+}
+
+TEST(LogicalPdfWriterIntegration, FinalizesOneFontObjectPerGrowingShard)
+{
+	const std::string sourcePath = SourceFontPath();
+	const std::vector<std::uint8_t> source = ReadBytes(sourcePath);
+	ASSERT_FALSE(source.empty());
+	std::uint16_t advance = 0;
+	PdfWriter::CLogicalTrueTypeSubsetError advanceError;
+	ASSERT_TRUE(PdfWriter::TryGetTrueTypeGlyphAdvance(source, 13, advance, advanceError))
+		<< advanceError.Message;
+
+	NSFonts::IApplicationFonts* fonts = NSFonts::NSApplication::Create();
+	ASSERT_NE(nullptr, fonts);
+	const std::string::size_type separator = sourcePath.find_last_of("/\\");
+	ASSERT_NE(std::string::npos, separator);
+	fonts->InitializeFromFolder(Widen(sourcePath.substr(0, separator)));
+
+	const std::string outputPath = "phase11-bounded-logical-font.pdf";
+	{
+		CPdfFile pdf(fonts);
+		pdf.CreatePdf();
+		ASSERT_EQ(S_OK, pdf.NewPage());
+		ASSERT_EQ(S_OK, pdf.put_FontPath(Widen(sourcePath)));
+		ASSERT_EQ(S_OK, pdf.put_FontFaceIndex(0));
+		ASSERT_EQ(S_OK, pdf.put_FontSize(12.0));
+		ASSERT_EQ(S_OK, pdf.put_FontStringGID(TRUE));
+
+		const double pointsPerMillimetre = 72.0 / 25.4;
+		for (unsigned int index = 0; index < 32; ++index)
+		{
+			CRendererLogicalUnit unit;
+			unit.Unicode = {0xE000u + index};
+			unit.VisualX = 10.0 + index * 4.0;
+			unit.VisualY = 30.0;
+			unit.LogicalAdvance = static_cast<double>(advance) / 1000.0 * 12.0 / pointsPerMillimetre;
+			unit.Components.push_back({13, 0.0, 0.0});
+			ASSERT_EQ(S_OK, pdf.CommandDrawTextLogicalUnit(unit));
+		}
+		CLogicalTextMetrics metrics = pdf.GetLogicalTextMetrics();
+		EXPECT_EQ(32u, metrics.UnitsReceived);
+		EXPECT_EQ(32u, metrics.LogicalUnits);
+		EXPECT_EQ(0u, metrics.FallbackUnits);
+		EXPECT_EQ(1u, metrics.SourceFonts);
+		EXPECT_EQ(1u, metrics.Shards);
+		EXPECT_EQ(32u, metrics.SemanticCids);
+		EXPECT_EQ(1u, metrics.VisualRecords);
+		EXPECT_EQ(1u, metrics.FontPublications);
+		ASSERT_EQ(0, pdf.SaveToFile(Widen(outputPath))) << pdf.GetLastLogicalTextDiagnostic();
+		metrics = pdf.GetLogicalTextMetrics();
+		EXPECT_EQ(1u, metrics.FontPublications);
+		EXPECT_GT(metrics.FinalEmbeddedFontBytes, 0u);
+		const std::size_t finalizedBytes = metrics.FinalEmbeddedFontBytes;
+		ASSERT_EQ(0, pdf.SaveToFile(Widen("phase11-repeated-save.pdf")))
+			<< pdf.GetLastLogicalTextDiagnostic();
+		metrics = pdf.GetLogicalTextMetrics();
+		EXPECT_EQ(1u, metrics.FontPublications);
+		EXPECT_EQ(finalizedBytes, metrics.FinalEmbeddedFontBytes);
+	}
+	RELEASEINTERFACE(fonts);
+
+	const std::string pdf = ReadText(outputPath);
+	ASSERT_FALSE(pdf.empty());
+	EXPECT_EQ(2u, CountOccurrences(pdf, "/BaseFont /AAAAAB+Logical"));
+	EXPECT_EQ(3u, CountOccurrences(pdf, "+Logical"));
+	EXPECT_EQ(std::string::npos, pdf.find("/BaseFont /Helvetica"));
+}
+
+TEST(LogicalPdfWriterIntegration, PreservesBidiSourceOrderAcrossNonmonotonicVisualPositions)
+{
+	const std::string sourcePath = SourceFontPath();
+	const std::vector<std::uint8_t> source = ReadBytes(sourcePath);
+	ASSERT_FALSE(source.empty());
+	std::uint16_t advance = 0;
+	PdfWriter::CLogicalTrueTypeSubsetError advanceError;
+	ASSERT_TRUE(PdfWriter::TryGetTrueTypeGlyphAdvance(source, 13, advance, advanceError))
+		<< advanceError.Message;
+
+	NSFonts::IApplicationFonts* fonts = NSFonts::NSApplication::Create();
+	ASSERT_NE(nullptr, fonts);
+	const std::string::size_type separator = sourcePath.find_last_of("/\\");
+	ASSERT_NE(std::string::npos, separator);
+	fonts->InitializeFromFolder(Widen(sourcePath.substr(0, separator)));
+
+	const std::string outputPath = "phase11-source-order-bidi.pdf";
+	{
+		CPdfFile pdf(fonts);
+		pdf.CreatePdf();
+		ASSERT_EQ(S_OK, pdf.NewPage());
+		ASSERT_EQ(S_OK, pdf.put_FontPath(Widen(sourcePath)));
+		ASSERT_EQ(S_OK, pdf.put_FontFaceIndex(0));
+		ASSERT_EQ(S_OK, pdf.put_FontSize(18.0));
+		ASSERT_EQ(S_OK, pdf.put_FontStringGID(TRUE));
+
+		const double pointsPerMillimetre = 72.0 / 25.4;
+		const double logicalAdvance = static_cast<double>(advance) / 1000.0 * 18.0 / pointsPerMillimetre;
+		const std::vector<std::vector<unsigned int>> sourceUnits = {
+			{0x0627, 0x0654},
+			{0x05E9, 0x05C1},
+			{0x0041},
+			{0x05D1},
+		};
+		const std::vector<double> visualPositions = {60.0, 52.0, 20.0, 44.0};
+		for (std::size_t index = 0; index < sourceUnits.size(); ++index)
+		{
+			CRendererLogicalUnit unit;
+			unit.Unicode = sourceUnits[index];
+			unit.VisualX = visualPositions[index];
+			unit.VisualY = 30.0;
+			unit.LogicalAdvance = logicalAdvance;
+			unit.Components.push_back({13, 0.0, 0.0});
+			ASSERT_EQ(S_OK, pdf.CommandDrawTextLogicalUnit(unit));
+		}
+		const CLogicalTextMetrics metrics = pdf.GetLogicalTextMetrics();
+		EXPECT_EQ(4u, metrics.UnitsReceived);
+		EXPECT_EQ(4u, metrics.LogicalUnits);
+		EXPECT_EQ(0u, metrics.FallbackUnits);
+		EXPECT_EQ(4u, metrics.SemanticCids);
+		EXPECT_EQ(1u, metrics.VisualRecords);
+		ASSERT_EQ(0, pdf.SaveToFile(Widen(outputPath))) << pdf.GetLastLogicalTextDiagnostic();
+	}
+	RELEASEINTERFACE(fonts);
+
+	const std::string pdf = ReadText(outputPath);
+	ASSERT_FALSE(pdf.empty());
+	EXPECT_EQ(2u, CountOccurrences(pdf, "/BaseFont /AAAAAB+Logical"));
 	EXPECT_EQ(std::string::npos, pdf.find("/BaseFont /Helvetica"));
 }

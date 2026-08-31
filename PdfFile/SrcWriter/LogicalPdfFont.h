@@ -33,6 +33,10 @@ namespace PdfWriter
 		}
 
 		unsigned int GetWidth(unsigned short code) override;
+		const std::string& GetFontName() const { return m_fontName; }
+		void SetWidth(unsigned short code, int width);
+		void SetWidths(const std::vector<int>& widths);
+		bool Update(const CLogicalType0FontResult& result, std::string* error = NULL);
 
 	private:
 		CLogicalPdfFont(CXref* pXref,
@@ -41,7 +45,15 @@ namespace PdfWriter
 		                const std::string& fontName,
 		                const CLogicalPdfFontDescriptorMetrics& metrics);
 
+		void UpdateWidthsDictionary();
+
+		std::string m_fontName;
 		std::vector<int> m_widths;
+		CDictObject* m_descendant = NULL;
+		CDictObject* m_descriptor = NULL;
+		CDictObject* m_fontFile = NULL;
+		CDictObject* m_cidToGid = NULL;
+		CDictObject* m_toUnicode = NULL;
 	};
 }
 
