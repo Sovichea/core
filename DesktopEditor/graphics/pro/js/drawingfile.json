@@ -153,7 +153,7 @@
 	},
 	{
 		"folder": "../../",
-		"files": ["GraphicsRenderer.cpp", "pro/pro_Graphics.cpp", "pro/pro_Fonts.cpp", "pro/pro_Image.cpp", "Graphics.cpp", "Brush.cpp", "BaseThread.cpp", "GraphicsPath.cpp", "BooleanOperations.cpp", "Image.cpp", "Matrix.cpp", "Clip.cpp", "TemporaryCS.cpp", "AlphaMask.cpp", "GraphicsLayer.cpp", "commands/DocInfo.cpp", "commands/AnnotField.cpp", "commands/FormField.cpp", "MetafileToRenderer.cpp", "MetafileToRendererReader.cpp"]
+		"files": ["GraphicsRenderer.cpp", "pro/pro_Graphics.cpp", "pro/pro_Fonts.cpp", "pro/pro_Image.cpp", "Graphics.cpp", "Brush.cpp", "BaseThread.cpp", "GraphicsPath.cpp", "BooleanOperations.cpp", "Image.cpp", "Matrix.cpp", "Clip.cpp", "TemporaryCS.cpp", "AlphaMask.cpp", "GraphicsLayer.cpp", "commands/DocInfo.cpp", "commands/AnnotField.cpp", "commands/FormField.cpp", "LogicalUnitMetafile.cpp", "MetafileToRenderer.cpp", "MetafileToRendererReader.cpp"]
 	},
 	{
 		"folder": "../../../fontengine/",

@@ -134,6 +134,7 @@ SOURCES += \
 	../../../../raster/Metafile/svg/SVGFramework.cpp \
 	../../../../raster/Metafile/svg/SVGTransformer.cpp \
 	\
+	../../../LogicalUnitMetafile.cpp \
 	../../../MetafileToRenderer.cpp \
 	../../../MetafileToRendererReader.cpp \
 	../../../MetafileToGraphicsRenderer.cpp \

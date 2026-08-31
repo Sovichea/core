@@ -26,6 +26,7 @@
 
 #include "agg_math.h"
 #include "./MetafileToRenderer.h"
+#include "./LogicalUnitMetafile.h"
 #include "../fontengine/FontManager.h"
 #include "../raster/BgraFrame.h"
 #include "../common/StringExt.h"
@@ -847,9 +848,23 @@ namespace NSOnlineOfficeBinToPdf
 					pCodePoints[nCodePointIndex] = oReader.ReadInt();
 
 				pRenderer->CommandDrawTextCHAR2(pCodePoints, nCountUnicodes, nGid, x, y, 0, 0);
-
-				if (pCodePoints)
-					delete [] pCodePoints;
+				RELEASEARRAYOBJECTS(pCodePoints);
+				break;
+			}
+			case ctDrawTextLogicalUnit:
+			{
+				const unsigned char* pPayload = NULL;
+				std::size_t nPayloadSize = 0;
+				if (!oReader.TryReadBoundedRecord(MaximumLogicalUnitRecordBytes, pPayload, nPayloadSize))
+					return false;
+				CRendererLogicalUnit oUnit;
+				const ELogicalUnitRecordResult eResult =
+					ParseLogicalUnitRecord(pPayload, nPayloadSize, oUnit);
+				if (ELogicalUnitRecordResult::Malformed == eResult)
+					return false;
+				if (ELogicalUnitRecordResult::Parsed == eResult &&
+				    S_OK != pRenderer->CommandDrawTextLogicalUnit(oUnit))
+					return false;
 				break;
 			}
 			case ctBeginCommand:
@@ -1349,6 +1364,18 @@ namespace NSOnlineOfficeBinToPdf
 				oReader.SkipDouble(2);
 				int nCountUnicodes = oReader.ReadInt();
 				oReader.SkipInt(nCountUnicodes);
+				break;
+			}
+			case ctDrawTextLogicalUnit:
+			{
+				const unsigned char* pPayload = NULL;
+				std::size_t nPayloadSize = 0;
+				if (!oReader.TryReadBoundedRecord(MaximumLogicalUnitRecordBytes, pPayload, nPayloadSize))
+					return;
+				CRendererLogicalUnit oUnit;
+				if (ELogicalUnitRecordResult::Malformed ==
+				    ParseLogicalUnitRecord(pPayload, nPayloadSize, oUnit))
+					return;
 				break;
 			}
 			case ctBeginCommand:

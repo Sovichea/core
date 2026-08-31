@@ -138,6 +138,7 @@ HEADERS += \
 	./../MetafileToRenderer.h \
 	./../MetafileToRendererCheck.h \
 	./../MetafileToRendererReader.h \
+	./../LogicalUnitMetafile.h \
 	./../MetafileToGraphicsRenderer.h \
 	\
 	./../commands/FormField.h \
@@ -147,6 +148,7 @@ HEADERS += \
 SOURCES += \
 	./../MetafileToRenderer.cpp \
 	./../MetafileToRendererReader.cpp \
+	./../LogicalUnitMetafile.cpp \
 	./../MetafileToGraphicsRenderer.cpp \
 	\
 	./../commands/FormField.cpp \

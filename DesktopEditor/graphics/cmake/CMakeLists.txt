@@ -80,6 +80,7 @@ add_library(graphics SHARED
     ${GRAPHICS_ROOT_DIR}/GraphicsPath.cpp
     ${GRAPHICS_ROOT_DIR}/GraphicsRenderer.cpp
     ${GRAPHICS_ROOT_DIR}/Matrix.cpp
+    ${GRAPHICS_ROOT_DIR}/LogicalUnitMetafile.cpp
     ${GRAPHICS_ROOT_DIR}/MetafileToGraphicsRenderer.cpp
     ${GRAPHICS_ROOT_DIR}/MetafileToRenderer.cpp
     ${GRAPHICS_ROOT_DIR}/MetafileToRendererReader.cpp
@@ -113,6 +114,7 @@ add_library(graphics SHARED
     ${GRAPHICS_ROOT_DIR}/Matrix_private.h
     ${GRAPHICS_ROOT_DIR}/Matrix.h
     ${GRAPHICS_ROOT_DIR}/MetafileToGraphicsRenderer.h
+    ${GRAPHICS_ROOT_DIR}/LogicalUnitMetafile.h
     ${GRAPHICS_ROOT_DIR}/MetafileToRenderer.h
     ${GRAPHICS_ROOT_DIR}/MetafileToRendererCheck.h
     ${GRAPHICS_ROOT_DIR}/MetafileToRendererReader.h

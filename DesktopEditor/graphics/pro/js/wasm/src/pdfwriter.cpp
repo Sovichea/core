@@ -100,6 +100,7 @@ HRESULT CPdfWriter::CommandDrawTextExCHAR(const LONG& lUnicode, const LONG& lGid
 HRESULT CPdfWriter::CommandDrawText      (const std::wstring& wsUnicodeText,                                                           const double& dX, const double& dY, const double& dW, const double& dH) { return 0; }
 HRESULT CPdfWriter::CommandDrawTextEx    (const std::wstring& wsUnicodeText, const unsigned int* pGids, const unsigned int nGidsCount, const double& dX, const double& dY, const double& dW, const double& dH) { return 0; }
 HRESULT CPdfWriter::CommandDrawTextCHAR2 (unsigned int* unUnicode, const unsigned int& unUnicodeCount, const unsigned int& unGid, const double& dX, const double& dY, const double& dW, const double& dH) { return 0; }
+HRESULT CPdfWriter::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit) { return S_FALSE; }
 HRESULT CPdfWriter::EndCommand(const DWORD& lType) { return 0; }
 HRESULT CPdfWriter::PathCommandMoveTo(const double& dX, const double& dY) { return 0; }
 HRESULT CPdfWriter::PathCommandLineTo(const double& dX, const double& dY) { return 0; }

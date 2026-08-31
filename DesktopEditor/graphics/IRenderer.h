@@ -167,6 +167,22 @@ namespace Aggplus {
 	class CGraphicsPath;
 }
 
+struct CRendererLogicalComponent
+{
+	unsigned int SourceGid = 0;
+	double RelativeX = 0.0;
+	double RelativeY = 0.0;
+};
+
+struct CRendererLogicalUnit
+{
+	std::vector<unsigned int> Unicode;
+	double LogicalAdvance = 0.0;
+	double VisualX = 0.0;
+	double VisualY = 0.0;
+	std::vector<CRendererLogicalComponent> Components;
+};
+
 // IRenderer
 class IRenderer : public IGrObject
 {
@@ -297,6 +313,29 @@ public:
 		UNUSED_VARIABLE(codepointscount);
 		LONG c = (NULL == codepoints) ? 32 : codepoints[0];
 		return CommandDrawTextExCHAR(c, (LONG)gid, x, y, w, h);
+	}
+
+	virtual HRESULT CommandDrawTextLogicalUnit(const CRendererLogicalUnit& unit)
+	{
+		if (unit.Unicode.empty() || unit.Components.empty())
+			return S_FALSE;
+		const CRendererLogicalComponent& first = unit.Components[0];
+		HRESULT result = CommandDrawTextCHAR2(
+			const_cast<unsigned int*>(unit.Unicode.data()),
+			static_cast<unsigned int>(unit.Unicode.size()), first.SourceGid,
+			unit.VisualX + first.RelativeX, unit.VisualY + first.RelativeY, 0, 0);
+		if (S_OK != result)
+			return result;
+		for (std::size_t index = 1; index < unit.Components.size(); ++index)
+		{
+			const CRendererLogicalComponent& component = unit.Components[index];
+			result = CommandDrawTextExCHAR(32, static_cast<LONG>(component.SourceGid),
+			                               unit.VisualX + component.RelativeX,
+			                               unit.VisualY + component.RelativeY, 0, 0);
+			if (S_OK != result)
+				return result;
+		}
+		return S_OK;
 	}
 
 	//-------- Markers for commands ---------------------------------------------------------------

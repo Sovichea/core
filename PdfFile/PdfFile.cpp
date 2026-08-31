@@ -1214,6 +1214,12 @@ HRESULT CPdfFile::CommandDrawTextCHAR2(unsigned int* unUnicode, const unsigned i
 		return S_FALSE;
 	return m_pInternal->pWriter->CommandDrawTextCHAR2(unUnicode, unUnicodeCount, unGid, dX, dY, dW, dH);
 }
+HRESULT CPdfFile::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit)
+{
+	if (!m_pInternal->pWriter)
+		return S_FALSE;
+	return m_pInternal->pWriter->CommandDrawTextLogicalUnit(oUnit);
+}
 HRESULT CPdfFile::BeginCommand(const DWORD& lType)
 {
 	return m_pInternal->pWriter ? S_OK : S_FALSE;

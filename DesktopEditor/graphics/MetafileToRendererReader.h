@@ -26,6 +26,8 @@
 #define _BUILD_METAFILE_TO_READER_H_
 
 #pragma once
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include "./IRenderer.h"
 
@@ -62,6 +64,30 @@ namespace NSOnlineOfficeBinToPdf
 		inline unsigned char* GetCurrentBuffer()
 		{
 			return m_cur;
+		}
+		inline std::size_t Remaining() const
+		{
+			return m_cur <= m_buffer_end ? static_cast<std::size_t>(m_buffer_end - m_cur) : 0;
+		}
+		inline bool TryReadBoundedRecord(std::size_t nMaximumBytes,
+		                                 const unsigned char*& pPayload,
+		                                 std::size_t& nPayloadSize)
+		{
+			pPayload = NULL;
+			nPayloadSize = 0;
+			if (Remaining() < 4)
+				return false;
+			const std::uint32_t nRecordSize =
+				static_cast<std::uint32_t>(m_cur[0]) |
+				static_cast<std::uint32_t>(m_cur[1]) << 8 |
+				static_cast<std::uint32_t>(m_cur[2]) << 16 |
+				static_cast<std::uint32_t>(m_cur[3]) << 24;
+			if (nRecordSize < 4 || nRecordSize > nMaximumBytes || nRecordSize > Remaining())
+				return false;
+			pPayload = m_cur + 4;
+			nPayloadSize = static_cast<std::size_t>(nRecordSize) - 4;
+			m_cur += nRecordSize;
+			return true;
 		}
 		inline void SetCurrentBuffer(unsigned char* cur)
 		{

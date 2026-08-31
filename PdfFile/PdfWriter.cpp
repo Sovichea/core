@@ -828,6 +828,11 @@ HRESULT CPdfWriter::CommandDrawTextCHAR2(unsigned int* pUnicodes, const unsigned
 		return DrawTextToRenderer(&unGid, 1, dX, dY) ? S_OK : S_FALSE;
 	return DrawText(pCodes, 2, dX, dY, UnicodesPUA(pUnicodes, unUnicodeCount) ? NSStringExt::CConverter::GetUtf8FromUTF32(pUnicodes, unUnicodeCount) : "") ? S_OK : S_FALSE;
 }
+HRESULT CPdfWriter::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit)
+{
+	UNUSED_VARIABLE(oUnit);
+	return S_FALSE;
+}
 //----------------------------------------------------------------------------------------
 // Command markers
 //----------------------------------------------------------------------------------------

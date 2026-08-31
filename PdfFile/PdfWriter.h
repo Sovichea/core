@@ -157,6 +157,7 @@ public:
 	HRESULT CommandDrawText      (const std::wstring& wsUnicodeText,                                                           const double& dX, const double& dY, const double& dW, const double& dH);
 	HRESULT CommandDrawTextEx    (const std::wstring& wsUnicodeText, const unsigned int* pGids, const unsigned int nGidsCount, const double& dX, const double& dY, const double& dW, const double& dH);
 	HRESULT CommandDrawTextCHAR2 (unsigned int* unUnicode, const unsigned int& unUnicodeCount, const unsigned int& unGid, const double& dX, const double& dY, const double& dW, const double& dH);
+	HRESULT CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit);
 	//----------------------------------------------------------------------------------------
 	// Command markers
 	//----------------------------------------------------------------------------------------
