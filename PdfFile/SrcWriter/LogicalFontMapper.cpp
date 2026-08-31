@@ -80,6 +80,12 @@ namespace PdfWriter
 		return &m_visualRecords[static_cast<std::size_t>(visualRecordId - 1)];
 	}
 
+	TLogicalVisualRecordId CLogicalFontShard::GetVisualRecordId(const CVisualUnitKey& visual) const
+	{
+		const auto found = m_visualRecordIds.find(visual);
+		return found == m_visualRecordIds.end() ? 0 : found->second;
+	}
+
 	CLogicalFontMapping CLogicalFontMapper::Map(const CLogicalUnitPlan& plan)
 	{
 		return m_shard.Map(plan);

@@ -68,6 +68,7 @@ namespace PdfWriter
 		std::size_t GetVisualCount() const;
 		const CLogicalCidRecord* GetCidRecord(TLogicalCid cid) const;
 		const CLogicalVisualRecord* GetVisualRecord(TLogicalVisualRecordId visualRecordId) const;
+		TLogicalVisualRecordId GetVisualRecordId(const CVisualUnitKey& visual) const;
 
 	private:
 		std::map<CSemanticUnitKey, TLogicalCid> m_semanticCids;

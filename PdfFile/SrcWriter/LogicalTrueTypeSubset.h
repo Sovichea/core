@@ -28,6 +28,8 @@
 
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -70,6 +72,32 @@ namespace PdfWriter
 		TLogicalVisualRecordId VisualRecordId = NoVisualRecord;
 		std::uint32_t SourceGlyphId = NoSourceGlyph;
 		std::string Message;
+	};
+
+	struct CLogicalCompactGlyphAddition
+	{
+		std::vector<std::uint32_t> SourceGlyphs;
+		bool Synthetic = false;
+	};
+
+	class CLogicalCompactGlyphTracker
+	{
+	public:
+		explicit CLogicalCompactGlyphTracker(
+			std::shared_ptr<const std::vector<std::uint8_t>> source);
+
+		bool TryPlan(const CVisualUnitKey& visual,
+		             CLogicalCompactGlyphAddition& addition,
+		             CLogicalTrueTypeSubsetError& error) const;
+		bool CanCommit(const CLogicalCompactGlyphAddition& addition,
+		               std::size_t glyphLimit) const;
+		void Commit(const CLogicalCompactGlyphAddition& addition);
+		std::size_t GetGlyphCount() const;
+
+	private:
+		std::shared_ptr<const std::vector<std::uint8_t>> m_source;
+		std::set<std::uint32_t> m_sourceGlyphs{0};
+		std::size_t m_syntheticGlyphs = 0;
 	};
 
 	struct CLogicalTrueTypeSubsetResult

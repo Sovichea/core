@@ -861,6 +861,106 @@ namespace PdfWriter
 		}
 	}
 
+	CLogicalCompactGlyphTracker::CLogicalCompactGlyphTracker(
+		std::shared_ptr<const std::vector<std::uint8_t>> source)
+		: m_source(std::move(source))
+	{
+	}
+
+	bool CLogicalCompactGlyphTracker::TryPlan(const CVisualUnitKey& visual,
+	                                         CLogicalCompactGlyphAddition& addition,
+	                                         CLogicalTrueTypeSubsetError& error) const
+	{
+		addition = CLogicalCompactGlyphAddition();
+		error = CLogicalTrueTypeSubsetError();
+		if (!m_source)
+			return SetError(error, CLogicalTrueTypeSubsetErrorCode::MalformedSfnt,
+			                "compact glyph tracker has no source font data");
+
+		CSourceFont font;
+		if (!ParseSourceFont(*m_source, font, error))
+			return false;
+		if (visual.Components.empty())
+			return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidVisualRecord,
+			                "logical visual has no source components");
+
+		std::vector<std::uint32_t> sourceToCompact(
+			font.NumGlyphs, CLogicalTrueTypeSubsetResult::UnmappedGlyph);
+		std::vector<std::uint16_t> glyphOrder{0};
+		sourceToCompact[0] = 0;
+		for (const CLogicalComponent& component : visual.Components)
+		{
+			if (component.GlyphId == 0 || component.GlyphId >= font.NumGlyphs)
+				return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidSourceGlyph,
+				                "logical visual references a source glyph outside the font", 0,
+				                component.GlyphId);
+			if (sourceToCompact[component.GlyphId] == CLogicalTrueTypeSubsetResult::UnmappedGlyph)
+			{
+				sourceToCompact[component.GlyphId] = static_cast<std::uint32_t>(glyphOrder.size());
+				glyphOrder.push_back(static_cast<std::uint16_t>(component.GlyphId));
+			}
+		}
+
+		std::vector<std::uint8_t> closureStates(font.NumGlyphs, 0);
+		for (std::size_t index = 0; index < glyphOrder.size(); ++index)
+		{
+			if (!AddClosure(glyphOrder[index], *m_source, font, closureStates, glyphOrder,
+			                sourceToCompact, error))
+				return false;
+		}
+
+		std::vector<CGlyphStats> sourceStats(font.NumGlyphs);
+		std::vector<std::uint8_t> statsStates(font.NumGlyphs, 0);
+		for (std::uint16_t gid : glyphOrder)
+		{
+			if (!TryGetGlyphStats(gid, *m_source, font, sourceStats, statsStates, error))
+				return false;
+			if (m_sourceGlyphs.find(gid) == m_sourceGlyphs.end())
+				addition.SourceGlyphs.push_back(gid);
+		}
+
+		const CLogicalComponent* component = visual.Components.size() == 1
+		                                           ? &visual.Components[0]
+		                                           : nullptr;
+		addition.Synthetic = component == nullptr || component->X != 0 || component->Y != 0 ||
+		                     visual.AdvanceWidth != static_cast<int>(font.Advances[component->GlyphId]);
+		if (addition.Synthetic)
+		{
+			CLogicalVisualRecord record;
+			record.Id = 1;
+			record.Visual = visual;
+			std::vector<std::uint8_t> ignoredGlyph;
+			CGlyphStats ignoredStats;
+			if (!BuildSyntheticGlyph(record, sourceToCompact, sourceStats,
+			                         ignoredGlyph, ignoredStats, error))
+				return false;
+		}
+		return true;
+	}
+
+	bool CLogicalCompactGlyphTracker::CanCommit(const CLogicalCompactGlyphAddition& addition,
+	                                            std::size_t glyphLimit) const
+	{
+		const std::size_t physicalLimit = std::min<std::size_t>(
+			glyphLimit, std::numeric_limits<std::uint16_t>::max());
+		if (GetGlyphCount() > physicalLimit ||
+		    addition.SourceGlyphs.size() > physicalLimit - GetGlyphCount())
+			return false;
+		const std::size_t withSources = GetGlyphCount() + addition.SourceGlyphs.size();
+		return !addition.Synthetic || withSources < physicalLimit;
+	}
+
+	void CLogicalCompactGlyphTracker::Commit(const CLogicalCompactGlyphAddition& addition)
+	{
+		m_sourceGlyphs.insert(addition.SourceGlyphs.begin(), addition.SourceGlyphs.end());
+		m_syntheticGlyphs += static_cast<std::size_t>(addition.Synthetic);
+	}
+
+	std::size_t CLogicalCompactGlyphTracker::GetGlyphCount() const
+	{
+		return m_sourceGlyphs.size() + m_syntheticGlyphs;
+	}
+
 	bool TryBuildLogicalTrueTypeImpl(const std::vector<std::uint8_t>& source,
 	                                 const CLogicalFontShard& shard,
 	                                 bool allowSynthetic,
