@@ -74,6 +74,8 @@ if( EMSCRIPTEN )
             RESULT_VARIABLE result
             OUTPUT_VARIABLE output
             ERROR_VARIABLE error
+            ECHO_OUTPUT_VARIABLE
+            ECHO_ERROR_VARIABLE
         )
 
         if(result) # on error
@@ -109,6 +111,8 @@ else()
             RESULT_VARIABLE result
             OUTPUT_VARIABLE output
             ERROR_VARIABLE error
+            ECHO_OUTPUT_VARIABLE
+            ECHO_ERROR_VARIABLE
         )
 
         if(result) # on error

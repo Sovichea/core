@@ -36,11 +36,27 @@ def check_prequisites():
         if shutil.which( tool ) is None:
             nc.abort_op( f"Tool not found: {tool}" )
 
+def disable_gclient_path_cache():
+    gclient_paths = depot_tools_path / "gclient_paths.py"
+    content = gclient_paths.read_text(encoding="utf-8")
+    updated, replacement_count = re.subn(
+        r"(?m)^@functools\.lru_cache(?:\(\))?\r?\n",
+        "",
+        content,
+    )
+    if replacement_count == 0:
+        print("[WARNING] No gclient_paths.py cache decorators were found")
+        return
+    gclient_paths.write_text(updated, encoding="utf-8")
+    print(f"Disabled {replacement_count} gclient path cache decorators")
+
+
 def apply_patches():
     patches_dir = script_dir / "tools" / "8.9" / "x64-linux-dynamic"
 
+    disable_gclient_path_cache()
+
     patches = [
-        { "name": "gclient_paths.patch", "dir": depot_tools_path },
         { "name": "jinja2.patch", "dir": v8_src_path / "third_party" / "jinja2" },
         { "name": "buildgn.patch", "dir": v8_src_path },
     ]
@@ -381,8 +397,11 @@ def fetch_and_patch():
 
     # Fetch v8
     print( "Fetching v8" )
-    nc.run_command( [ "git", "clone", "https://chromium.googlesource.com/v8/v8.git", v8_src_path ], "Clone v8" )
-    nc.run_command( [ "git", "checkout", "8.9.45" ], "Git checkout 8.9.45", v8_src_path )
+    nc.run_command(
+        [ "git", "clone", "--depth", "1", "--branch", "8.9.45",
+          "https://chromium.googlesource.com/v8/v8.git", v8_src_path ],
+        "Clone V8 tag 8.9.45"
+    )
 
     nc.create_work_dir_ok_marker()
 

@@ -151,8 +151,13 @@ def run_command(
     output_pipe = None if verbose else subprocess.PIPE
     final_env = os.environ.copy() | ( {} if env is None else env )
 
+    print(f"  Starting {description}...")
+    started_at = time.perf_counter()
+
     try:
         _ = subprocess.run( cmd, check=True, stdout=output_pipe, stderr=output_pipe, text=True, cwd=cwd, env = final_env )
+        elapsed = time.perf_counter() - started_at
+        print(f"  Finished {description} in {elapsed:.1f}s")
     except subprocess.CalledProcessError as e:
         if verbose:
             abort_op( f"{description} failed", error_is_fatal=error_is_fatal )
