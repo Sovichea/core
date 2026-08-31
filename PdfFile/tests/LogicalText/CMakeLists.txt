@@ -9,7 +9,9 @@ include(${CORE_ROOT_DIR}/common.cmake)
 add_core_gtest(
     NAME pdf_logical_text_test
     SOURCES
+        LogicalFontMapperTest.cpp
         LogicalTextTest.cpp
+        ${CORE_ROOT_DIR}/PdfFile/SrcWriter/LogicalFontMapper.cpp
         ${CORE_ROOT_DIR}/PdfFile/SrcWriter/LogicalText.cpp
     GTEST_MAIN
 )
