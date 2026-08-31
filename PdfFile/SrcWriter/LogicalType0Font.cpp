@@ -204,7 +204,7 @@ namespace PdfWriter
 
 		CLogicalTrueTypeSubsetResult subset;
 		CLogicalTrueTypeSubsetError subsetError;
-		if (!TryBuildSourceBackedLogicalTrueType(source, shard, subset, subsetError))
+		if (!TryBuildLogicalTrueType(source, shard, subset, subsetError))
 		{
 			error.SubsetError = subsetError;
 			return SetError(error, CLogicalType0FontErrorCode::SubsetBuildFailed,

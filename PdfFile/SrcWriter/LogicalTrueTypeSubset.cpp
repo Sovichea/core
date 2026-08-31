@@ -59,6 +59,7 @@ namespace PdfWriter
 		constexpr std::uint32_t SfntTrueType = 0x00010000u;
 		constexpr std::uint32_t ChecksumMagic = 0xB1B0AFBAu;
 		constexpr std::uint16_t ArgWords = 0x0001u;
+		constexpr std::uint16_t ArgsAreXyValues = 0x0002u;
 		constexpr std::uint16_t MoreComponents = 0x0020u;
 		constexpr std::uint16_t HaveScale = 0x0008u;
 		constexpr std::uint16_t HaveXyScale = 0x0040u;
@@ -96,6 +97,33 @@ namespace PdfWriter
 			std::vector<std::uint8_t> Data;
 			std::uint32_t Checksum = 0;
 			std::uint32_t Offset = 0;
+		};
+
+		struct CBBox
+		{
+			std::int16_t XMin = 0;
+			std::int16_t YMin = 0;
+			std::int16_t XMax = 0;
+			std::int16_t YMax = 0;
+		};
+
+		struct CGlyphStats
+		{
+			std::uint32_t Points = 0;
+			std::uint32_t Contours = 0;
+			std::uint32_t Depth = 0;
+			std::uint32_t ComponentCount = 0;
+			bool IsComposite = false;
+			bool HasContours = false;
+			CBBox Bounds;
+		};
+
+		struct COutputGlyphMetric
+		{
+			std::uint16_t Advance = 0;
+			std::int16_t LeftSideBearing = 0;
+			bool HasContours = false;
+			CBBox Bounds;
 		};
 
 		bool SetError(CLogicalTrueTypeSubsetError& error,
@@ -153,6 +181,11 @@ namespace PdfWriter
 		{
 			data.push_back(static_cast<std::uint8_t>(value >> 8));
 			data.push_back(static_cast<std::uint8_t>(value));
+		}
+
+		void AppendS16(std::vector<std::uint8_t>& data, std::int16_t value)
+		{
+			AppendU16(data, static_cast<std::uint16_t>(value));
 		}
 
 		void AppendU32(std::vector<std::uint8_t>& data, std::uint32_t value)
@@ -499,6 +532,229 @@ namespace PdfWriter
 			return true;
 		}
 
+		bool TryGetGlyphStats(std::uint16_t glyphId,
+		                      const std::vector<std::uint8_t>& source,
+		                      const CSourceFont& font,
+		                      std::vector<CGlyphStats>& cache,
+		                      std::vector<std::uint8_t>& states,
+		                      CLogicalTrueTypeSubsetError& error)
+		{
+			struct CFrame
+			{
+				std::uint16_t GlyphId = 0;
+				std::vector<CCompositeReference> References;
+				std::size_t NextReference = 0;
+			};
+
+			if (states[glyphId] == 2)
+				return true;
+			std::vector<CFrame> stack{{glyphId, {}, 0}};
+			const CTableView& glyf = font.Tables.at(TagGlyf);
+			while (!stack.empty())
+			{
+				CFrame& frame = stack.back();
+				if (states[frame.GlyphId] == 0)
+				{
+					states[frame.GlyphId] = 1;
+					const std::size_t begin = glyf.Offset + font.GlyphOffsets[frame.GlyphId];
+					const std::size_t end = glyf.Offset + font.GlyphOffsets[static_cast<std::size_t>(frame.GlyphId) + 1];
+					CGlyphStats& stats = cache[frame.GlyphId];
+					if (begin == end)
+					{
+						states[frame.GlyphId] = 2;
+						stack.pop_back();
+						continue;
+					}
+					if (end - begin < 10)
+						return SetError(error, CLogicalTrueTypeSubsetErrorCode::MalformedGlyf,
+						                "glyph record is shorter than its header", 0, frame.GlyphId);
+					stats.Bounds = {ReadS16(source, begin + 2), ReadS16(source, begin + 4),
+					                ReadS16(source, begin + 6), ReadS16(source, begin + 8)};
+					const std::int16_t contourCount = ReadS16(source, begin);
+					if (contourCount >= 0)
+					{
+						stats.Contours = static_cast<std::uint32_t>(contourCount);
+						stats.HasContours = contourCount > 0;
+						if (contourCount > 0)
+						{
+							stats.Points = static_cast<std::uint32_t>(
+								ReadU16(source, begin + 10 + (static_cast<std::size_t>(contourCount) - 1) * 2)) + 1u;
+							if (stats.Points > std::numeric_limits<std::uint16_t>::max())
+								return SetError(error, CLogicalTrueTypeSubsetErrorCode::MalformedMaxp,
+								                "simple glyph point count exceeds TrueType maxp", 0,
+								                frame.GlyphId);
+						}
+						states[frame.GlyphId] = 2;
+						stack.pop_back();
+						continue;
+					}
+					stats.IsComposite = true;
+					if (!ParseComposite(source, font, frame.GlyphId, frame.References, error))
+						return false;
+					stats.ComponentCount = static_cast<std::uint32_t>(frame.References.size());
+				}
+
+				if (frame.NextReference < frame.References.size())
+				{
+					const std::uint16_t dependency = frame.References[frame.NextReference++].GlyphId;
+					if (states[dependency] == 1)
+						return SetError(error, CLogicalTrueTypeSubsetErrorCode::CompositeCycle,
+						                "composite glyph dependency cycle detected", 0, dependency);
+					if (states[dependency] == 0)
+						stack.push_back({dependency, {}, 0});
+					continue;
+				}
+
+				CGlyphStats& stats = cache[frame.GlyphId];
+				for (const CCompositeReference& reference : frame.References)
+				{
+					const CGlyphStats& child = cache[reference.GlyphId];
+					if (child.Points > std::numeric_limits<std::uint16_t>::max() ||
+					    child.Contours > std::numeric_limits<std::uint16_t>::max() ||
+					    stats.Points > std::numeric_limits<std::uint16_t>::max() - child.Points ||
+					    stats.Contours > std::numeric_limits<std::uint16_t>::max() - child.Contours)
+						return SetError(error, CLogicalTrueTypeSubsetErrorCode::MalformedMaxp,
+						                "source composite point or contour count exceeds TrueType maxp", 0,
+						                frame.GlyphId);
+					stats.Points += child.Points;
+					stats.Contours += child.Contours;
+					stats.Depth = std::max(stats.Depth, child.Depth + 1u);
+					stats.HasContours = stats.HasContours || child.HasContours;
+				}
+				if (stats.Depth > std::numeric_limits<std::uint16_t>::max() ||
+				    stats.ComponentCount > std::numeric_limits<std::uint16_t>::max())
+					return SetError(error, CLogicalTrueTypeSubsetErrorCode::MalformedMaxp,
+					                "source composite depth or component count exceeds TrueType maxp", 0,
+					                frame.GlyphId);
+				states[frame.GlyphId] = 2;
+				stack.pop_back();
+			}
+			return true;
+		}
+
+		bool TryReadTranslatedGlyphBBox(const CLogicalComponent& component,
+		                                const CGlyphStats& sourceStats,
+		                                TLogicalVisualRecordId visualId,
+		                                CBBox& bbox,
+		                                bool& hasBounds,
+		                                CLogicalTrueTypeSubsetError& error)
+		{
+			if (component.X < std::numeric_limits<std::int16_t>::min() ||
+			    component.X > std::numeric_limits<std::int16_t>::max() ||
+			    component.Y < std::numeric_limits<std::int16_t>::min() ||
+			    component.Y > std::numeric_limits<std::int16_t>::max())
+				return SetError(error, CLogicalTrueTypeSubsetErrorCode::ComponentCoordinateOverflow,
+				                "synthetic component coordinate does not fit signed 16-bit TrueType arguments",
+				                visualId, component.GlyphId);
+			hasBounds = sourceStats.HasContours;
+			if (!hasBounds)
+			{
+				bbox = CBBox();
+				return true;
+			}
+
+			const auto translate = [&](std::int16_t value, int offset, std::int16_t& translated) {
+				const int combined = static_cast<int>(value) + offset;
+				if (combined < std::numeric_limits<std::int16_t>::min() ||
+				    combined > std::numeric_limits<std::int16_t>::max())
+					return false;
+				translated = static_cast<std::int16_t>(combined);
+				return true;
+			};
+			if (!translate(sourceStats.Bounds.XMin, component.X, bbox.XMin) ||
+			    !translate(sourceStats.Bounds.YMin, component.Y, bbox.YMin) ||
+			    !translate(sourceStats.Bounds.XMax, component.X, bbox.XMax) ||
+			    !translate(sourceStats.Bounds.YMax, component.Y, bbox.YMax))
+				return SetError(error, CLogicalTrueTypeSubsetErrorCode::SyntheticBoundsOverflow,
+				                "translated synthetic glyph bounds do not fit signed 16-bit TrueType values",
+				                visualId, component.GlyphId);
+			return true;
+		}
+
+		bool BuildSyntheticGlyph(const CLogicalVisualRecord& visual,
+		                         const std::vector<std::uint32_t>& sourceToSubset,
+		                         const std::vector<CGlyphStats>& sourceStats,
+		                         std::vector<std::uint8_t>& glyph,
+		                         CGlyphStats& syntheticStats,
+		                         CLogicalTrueTypeSubsetError& error)
+		{
+			if (visual.Visual.Components.empty())
+				return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidVisualRecord,
+				                "synthetic visual has no source components", visual.Id);
+			if (visual.Visual.Components.size() > std::numeric_limits<std::uint16_t>::max())
+				return SetError(error, CLogicalTrueTypeSubsetErrorCode::SyntheticResourceOverflow,
+				                "synthetic visual has more than 65535 direct components", visual.Id);
+			if (visual.Visual.AdvanceWidth < 0 || visual.Visual.AdvanceWidth > std::numeric_limits<std::uint16_t>::max())
+				return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidAdvanceWidth,
+				                "synthetic visual advance does not fit unsigned 16-bit hmtx", visual.Id);
+
+			syntheticStats = CGlyphStats();
+			syntheticStats.IsComposite = true;
+			syntheticStats.ComponentCount = static_cast<std::uint32_t>(visual.Visual.Components.size());
+			bool hasBounds = false;
+			for (const CLogicalComponent& component : visual.Visual.Components)
+			{
+				const CGlyphStats& child = sourceStats[component.GlyphId];
+				if (child.Points > std::numeric_limits<std::uint16_t>::max() ||
+				    child.Contours > std::numeric_limits<std::uint16_t>::max() ||
+				    syntheticStats.Points > std::numeric_limits<std::uint16_t>::max() - child.Points ||
+				    syntheticStats.Contours > std::numeric_limits<std::uint16_t>::max() - child.Contours ||
+				    child.Depth >= std::numeric_limits<std::uint16_t>::max())
+					return SetError(error, CLogicalTrueTypeSubsetErrorCode::SyntheticResourceOverflow,
+					                "synthetic point, contour, or depth requirement exceeds TrueType maxp",
+					                visual.Id, component.GlyphId);
+				syntheticStats.Points += child.Points;
+				syntheticStats.Contours += child.Contours;
+				syntheticStats.Depth = std::max(syntheticStats.Depth, child.Depth + 1u);
+
+				CBBox translated;
+				bool componentHasBounds = false;
+				if (!TryReadTranslatedGlyphBBox(component, child, visual.Id, translated,
+				                                componentHasBounds, error))
+					return false;
+				if (!componentHasBounds)
+					continue;
+				if (!hasBounds)
+				{
+					syntheticStats.Bounds = translated;
+					hasBounds = true;
+				}
+				else
+				{
+					syntheticStats.Bounds.XMin = std::min(syntheticStats.Bounds.XMin, translated.XMin);
+					syntheticStats.Bounds.YMin = std::min(syntheticStats.Bounds.YMin, translated.YMin);
+					syntheticStats.Bounds.XMax = std::max(syntheticStats.Bounds.XMax, translated.XMax);
+					syntheticStats.Bounds.YMax = std::max(syntheticStats.Bounds.YMax, translated.YMax);
+				}
+			}
+			syntheticStats.HasContours = hasBounds;
+
+			glyph.clear();
+			glyph.reserve(10 + visual.Visual.Components.size() * 8);
+			AppendS16(glyph, -1);
+			AppendS16(glyph, syntheticStats.Bounds.XMin);
+			AppendS16(glyph, syntheticStats.Bounds.YMin);
+			AppendS16(glyph, syntheticStats.Bounds.XMax);
+			AppendS16(glyph, syntheticStats.Bounds.YMax);
+			for (std::size_t index = 0; index < visual.Visual.Components.size(); ++index)
+			{
+				const CLogicalComponent& component = visual.Visual.Components[index];
+				const std::uint32_t compactGid = sourceToSubset[component.GlyphId];
+				if (compactGid == CLogicalTrueTypeSubsetResult::UnmappedGlyph ||
+				    compactGid > std::numeric_limits<std::uint16_t>::max())
+					return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidSourceGlyph,
+					                "synthetic component has no compact source glyph", visual.Id, component.GlyphId);
+				std::uint16_t flags = ArgWords | ArgsAreXyValues;
+				if (index + 1 < visual.Visual.Components.size())
+					flags |= MoreComponents;
+				AppendU16(glyph, flags);
+				AppendU16(glyph, static_cast<std::uint16_t>(compactGid));
+				AppendS16(glyph, static_cast<std::int16_t>(component.X));
+				AppendS16(glyph, static_cast<std::int16_t>(component.Y));
+			}
+			return true;
+		}
+
 		std::uint32_t TableChecksum(const std::vector<std::uint8_t>& data)
 		{
 			std::uint32_t sum = 0;
@@ -605,10 +861,11 @@ namespace PdfWriter
 		}
 	}
 
-	bool TryBuildSourceBackedLogicalTrueType(const std::vector<std::uint8_t>& source,
-	                                         const CLogicalFontShard& shard,
-	                                         CLogicalTrueTypeSubsetResult& result,
-	                                         CLogicalTrueTypeSubsetError& error)
+	bool TryBuildLogicalTrueTypeImpl(const std::vector<std::uint8_t>& source,
+	                                 const CLogicalFontShard& shard,
+	                                 bool allowSynthetic,
+	                                 CLogicalTrueTypeSubsetResult& result,
+	                                 CLogicalTrueTypeSubsetError& error)
 	{
 		result = CLogicalTrueTypeSubsetResult();
 		error = CLogicalTrueTypeSubsetError();
@@ -624,40 +881,59 @@ namespace PdfWriter
 		result.UnitsPerEm = font.UnitsPerEm;
 		result.SourceGidToSubsetGid.assign(font.NumGlyphs, CLogicalTrueTypeSubsetResult::UnmappedGlyph);
 		result.VisualRecordToSubsetGid.assign(shard.GetVisualCount() + 1, 0);
+		result.VisualRecordIsSynthetic.assign(shard.GetVisualCount() + 1, false);
 		result.CidToSubsetGid.assign(shard.GetSemanticCount() + 1, 0);
-		std::vector<std::uint16_t> glyphOrder;
-		glyphOrder.push_back(0);
+		std::vector<const CLogicalVisualRecord*> visuals(shard.GetVisualCount() + 1, nullptr);
+		std::vector<std::uint16_t> glyphOrder{0};
 		result.SourceGidToSubsetGid[0] = 0;
+		std::size_t syntheticCount = 0;
 
 		for (std::size_t id = 1; id <= shard.GetVisualCount(); ++id)
 		{
 			const TLogicalVisualRecordId visualId = static_cast<TLogicalVisualRecordId>(id);
 			const CLogicalVisualRecord* record = shard.GetVisualRecord(visualId);
-			if (record == nullptr || record->Id != visualId)
+			if (record == nullptr || record->Id != visualId || record->Visual.Components.empty())
 				return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidVisualRecord,
-				                "visual record ID is missing or inconsistent", visualId);
-			if (record->Visual.Components.size() != 1 || record->Visual.Components[0].X != 0 ||
-			    record->Visual.Components[0].Y != 0)
+				                "visual record is missing, inconsistent, or has no components", visualId);
+			visuals[id] = record;
+
+			bool exactSource = record->Visual.Components.size() == 1 &&
+			                   record->Visual.Components[0].X == 0 &&
+			                   record->Visual.Components[0].Y == 0;
+			for (const CLogicalComponent& component : record->Visual.Components)
+			{
+				const std::uint32_t sourceGid = component.GlyphId;
+				if (sourceGid == 0 || sourceGid >= font.NumGlyphs)
+					return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidSourceGlyph,
+					                "visual source glyph must be between 1 and maxp.numGlyphs minus one",
+					                visualId, sourceGid);
+				if (result.SourceGidToSubsetGid[sourceGid] == CLogicalTrueTypeSubsetResult::UnmappedGlyph)
+				{
+					if (glyphOrder.size() >= std::numeric_limits<std::uint16_t>::max())
+						return SetError(error, CLogicalTrueTypeSubsetErrorCode::TooManyGlyphs,
+						                "compact source glyph count exceeds 65535", visualId, sourceGid);
+					result.SourceGidToSubsetGid[sourceGid] = static_cast<std::uint32_t>(glyphOrder.size());
+					glyphOrder.push_back(static_cast<std::uint16_t>(sourceGid));
+				}
+			}
+
+			if (exactSource)
+			{
+				const std::uint32_t sourceGid = record->Visual.Components[0].GlyphId;
+				exactSource = record->Visual.AdvanceWidth == static_cast<int>(font.Advances[sourceGid]);
+			}
+			if (!exactSource && !allowSynthetic)
+			{
+				if (record->Visual.Components.size() == 1 && record->Visual.Components[0].X == 0 &&
+				    record->Visual.Components[0].Y == 0)
+					return SetError(error, CLogicalTrueTypeSubsetErrorCode::AdvanceWidthMismatch,
+					                "visual advance does not equal the nominal source hmtx advance",
+					                visualId, record->Visual.Components[0].GlyphId);
 				return SetError(error, CLogicalTrueTypeSubsetErrorCode::UnsupportedVisual,
 				                "source-backed visuals require exactly one unshifted component", visualId);
-			const std::uint32_t sourceGid = record->Visual.Components[0].GlyphId;
-			if (sourceGid == 0 || sourceGid >= font.NumGlyphs)
-				return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidSourceGlyph,
-				                "visual source glyph must be between 1 and maxp.numGlyphs minus one",
-				                visualId, sourceGid);
-			if (record->Visual.AdvanceWidth != static_cast<int>(font.Advances[sourceGid]))
-				return SetError(error, CLogicalTrueTypeSubsetErrorCode::AdvanceWidthMismatch,
-				                "visual advance does not equal the nominal source hmtx advance", visualId, sourceGid);
-
-			if (result.SourceGidToSubsetGid[sourceGid] == CLogicalTrueTypeSubsetResult::UnmappedGlyph)
-			{
-				if (glyphOrder.size() >= std::numeric_limits<std::uint16_t>::max())
-					return SetError(error, CLogicalTrueTypeSubsetErrorCode::TooManyGlyphs,
-					                "compact glyph count exceeds 65535", visualId, sourceGid);
-				result.SourceGidToSubsetGid[sourceGid] = static_cast<std::uint32_t>(glyphOrder.size());
-				glyphOrder.push_back(static_cast<std::uint16_t>(sourceGid));
 			}
-			result.VisualRecordToSubsetGid[id] = result.SourceGidToSubsetGid[sourceGid];
+			result.VisualRecordIsSynthetic[id] = !exactSource;
+			syntheticCount += static_cast<std::size_t>(!exactSource);
 		}
 
 		std::vector<std::uint8_t> states(font.NumGlyphs, 0);
@@ -666,6 +942,26 @@ namespace PdfWriter
 			if (!AddClosure(glyphOrder[i], source, font, states, glyphOrder,
 			                result.SourceGidToSubsetGid, error))
 				return false;
+		}
+		std::vector<CGlyphStats> sourceStats(font.NumGlyphs);
+		std::vector<std::uint8_t> statsStates(font.NumGlyphs, 0);
+		for (std::uint16_t oldGid : glyphOrder)
+		{
+			if (!TryGetGlyphStats(oldGid, source, font, sourceStats, statsStates, error))
+				return false;
+		}
+		if (syntheticCount > std::numeric_limits<std::uint16_t>::max() - glyphOrder.size())
+			return SetError(error, CLogicalTrueTypeSubsetErrorCode::TooManyGlyphs,
+			                "compact source and synthetic glyph count exceeds 65535");
+
+		std::size_t nextSyntheticGid = glyphOrder.size();
+		for (std::size_t id = 1; id < visuals.size(); ++id)
+		{
+			if (result.VisualRecordIsSynthetic[id])
+				result.VisualRecordToSubsetGid[id] = static_cast<std::uint32_t>(nextSyntheticGid++);
+			else
+				result.VisualRecordToSubsetGid[id] =
+					result.SourceGidToSubsetGid[visuals[id]->Visual.Components[0].GlyphId];
 		}
 
 		for (std::size_t cid = 1; cid <= shard.GetSemanticCount(); ++cid)
@@ -685,8 +981,13 @@ namespace PdfWriter
 		std::vector<std::uint8_t> glyf;
 		std::vector<std::uint8_t> loca;
 		std::vector<std::uint8_t> hmtx;
-		loca.reserve((glyphOrder.size() + 1) * 4);
-		hmtx.reserve(glyphOrder.size() * 4);
+		std::vector<CGlyphStats> outputStats;
+		std::vector<COutputGlyphMetric> outputMetrics;
+		const std::size_t totalGlyphs = glyphOrder.size() + syntheticCount;
+		outputStats.reserve(totalGlyphs);
+		outputMetrics.reserve(totalGlyphs);
+		loca.reserve((totalGlyphs + 1) * 4);
+		hmtx.reserve(totalGlyphs * 4);
 		const CTableView& sourceGlyf = font.Tables.at(TagGlyf);
 		for (std::uint16_t oldGid : glyphOrder)
 		{
@@ -712,20 +1013,123 @@ namespace PdfWriter
 			}
 			glyf.insert(glyf.end(), glyph.begin(), glyph.end());
 			AppendU16(hmtx, font.Advances[oldGid]);
-			AppendU16(hmtx, static_cast<std::uint16_t>(font.LeftSideBearings[oldGid]));
+			AppendS16(hmtx, font.LeftSideBearings[oldGid]);
+			outputStats.push_back(sourceStats[oldGid]);
+			outputMetrics.push_back({font.Advances[oldGid], font.LeftSideBearings[oldGid],
+			                         sourceStats[oldGid].HasContours, sourceStats[oldGid].Bounds});
+		}
+		for (std::size_t id = 1; id < visuals.size(); ++id)
+		{
+			if (!result.VisualRecordIsSynthetic[id])
+				continue;
+			if (glyf.size() > std::numeric_limits<std::uint32_t>::max())
+				return SetError(error, CLogicalTrueTypeSubsetErrorCode::OutputTooLarge,
+				                "rebuilt glyf table exceeds long loca offsets");
+			AppendU32(loca, static_cast<std::uint32_t>(glyf.size()));
+			std::vector<std::uint8_t> glyph;
+			CGlyphStats stats;
+			if (!BuildSyntheticGlyph(*visuals[id], result.SourceGidToSubsetGid, sourceStats,
+			                         glyph, stats, error))
+				return false;
+			glyf.insert(glyf.end(), glyph.begin(), glyph.end());
+			const std::uint16_t advance = static_cast<std::uint16_t>(visuals[id]->Visual.AdvanceWidth);
+			AppendU16(hmtx, advance);
+			AppendS16(hmtx, stats.HasContours ? stats.Bounds.XMin : 0);
+			outputStats.push_back(stats);
+			outputMetrics.push_back({advance, stats.HasContours ? stats.Bounds.XMin : 0,
+			                         stats.HasContours, stats.Bounds});
 		}
 		if (glyf.size() > std::numeric_limits<std::uint32_t>::max())
 			return SetError(error, CLogicalTrueTypeSubsetErrorCode::OutputTooLarge,
 			                "rebuilt glyf table exceeds long loca offsets");
 		AppendU32(loca, static_cast<std::uint32_t>(glyf.size()));
 
+		if (outputStats.size() != totalGlyphs || outputMetrics.size() != totalGlyphs)
+			return SetError(error, CLogicalTrueTypeSubsetErrorCode::InvalidVisualRecord,
+			                "compact glyph statistics do not match the output glyph count");
+
+		bool hasFontBounds = false;
+		CBBox fontBounds;
+		std::uint16_t advanceWidthMax = 0;
+		int minLeftSideBearing = std::numeric_limits<int>::max();
+		int minRightSideBearing = std::numeric_limits<int>::max();
+		int maxExtent = std::numeric_limits<int>::min();
+		std::uint32_t maxPoints = 0;
+		std::uint32_t maxContours = 0;
+		std::uint32_t maxCompositePoints = 0;
+		std::uint32_t maxCompositeContours = 0;
+		std::uint32_t maxComponentElements = 0;
+		std::uint32_t maxComponentDepth = 0;
+		for (std::size_t index = 0; index < totalGlyphs; ++index)
+		{
+			const CGlyphStats& stats = outputStats[index];
+			const COutputGlyphMetric& metric = outputMetrics[index];
+			advanceWidthMax = std::max(advanceWidthMax, metric.Advance);
+			if (stats.IsComposite)
+			{
+				maxCompositePoints = std::max(maxCompositePoints, stats.Points);
+				maxCompositeContours = std::max(maxCompositeContours, stats.Contours);
+				maxComponentElements = std::max(maxComponentElements, stats.ComponentCount);
+				maxComponentDepth = std::max(maxComponentDepth, stats.Depth);
+			}
+			else
+			{
+				maxPoints = std::max(maxPoints, stats.Points);
+				maxContours = std::max(maxContours, stats.Contours);
+			}
+			if (!metric.HasContours)
+				continue;
+			if (!hasFontBounds)
+			{
+				fontBounds = metric.Bounds;
+				hasFontBounds = true;
+			}
+			else
+			{
+				fontBounds.XMin = std::min(fontBounds.XMin, metric.Bounds.XMin);
+				fontBounds.YMin = std::min(fontBounds.YMin, metric.Bounds.YMin);
+				fontBounds.XMax = std::max(fontBounds.XMax, metric.Bounds.XMax);
+				fontBounds.YMax = std::max(fontBounds.YMax, metric.Bounds.YMax);
+			}
+			const int glyphWidth = static_cast<int>(metric.Bounds.XMax) - metric.Bounds.XMin;
+			minLeftSideBearing = std::min(minLeftSideBearing, static_cast<int>(metric.LeftSideBearing));
+			minRightSideBearing = std::min(minRightSideBearing,
+			                               static_cast<int>(metric.Advance) - metric.LeftSideBearing - glyphWidth);
+			maxExtent = std::max(maxExtent, static_cast<int>(metric.LeftSideBearing) + glyphWidth);
+		}
+		if (hasFontBounds &&
+		    (minLeftSideBearing < std::numeric_limits<std::int16_t>::min() ||
+		     minLeftSideBearing > std::numeric_limits<std::int16_t>::max() ||
+		     minRightSideBearing < std::numeric_limits<std::int16_t>::min() ||
+		     minRightSideBearing > std::numeric_limits<std::int16_t>::max() ||
+		     maxExtent < std::numeric_limits<std::int16_t>::min() ||
+		     maxExtent > std::numeric_limits<std::int16_t>::max()))
+			return SetError(error, CLogicalTrueTypeSubsetErrorCode::MalformedHhea,
+			                "compact glyph extrema do not fit signed 16-bit hhea fields");
+
 		std::vector<std::uint8_t> head = CopyTable(source, font.Tables.at(TagHead));
 		WriteU32(head, 8, 0);
 		WriteU16(head, 50, 1);
+		WriteU16(head, 36, static_cast<std::uint16_t>(hasFontBounds ? fontBounds.XMin : 0));
+		WriteU16(head, 38, static_cast<std::uint16_t>(hasFontBounds ? fontBounds.YMin : 0));
+		WriteU16(head, 40, static_cast<std::uint16_t>(hasFontBounds ? fontBounds.XMax : 0));
+		WriteU16(head, 42, static_cast<std::uint16_t>(hasFontBounds ? fontBounds.YMax : 0));
+
 		std::vector<std::uint8_t> hhea = CopyTable(source, font.Tables.at(TagHhea));
-		WriteU16(hhea, 34, static_cast<std::uint16_t>(glyphOrder.size()));
+		WriteU16(hhea, 10, advanceWidthMax);
+		WriteU16(hhea, 12, static_cast<std::uint16_t>(hasFontBounds ? minLeftSideBearing : 0));
+		WriteU16(hhea, 14, static_cast<std::uint16_t>(hasFontBounds ? minRightSideBearing : 0));
+		WriteU16(hhea, 16, static_cast<std::uint16_t>(hasFontBounds ? maxExtent : 0));
+		WriteU16(hhea, 34, static_cast<std::uint16_t>(totalGlyphs));
+
 		std::vector<std::uint8_t> maxp = CopyTable(source, font.Tables.at(TagMaxp));
-		WriteU16(maxp, 4, static_cast<std::uint16_t>(glyphOrder.size()));
+		WriteU16(maxp, 4, static_cast<std::uint16_t>(totalGlyphs));
+		WriteU16(maxp, 6, static_cast<std::uint16_t>(maxPoints));
+		WriteU16(maxp, 8, static_cast<std::uint16_t>(maxContours));
+		WriteU16(maxp, 10, static_cast<std::uint16_t>(maxCompositePoints));
+		WriteU16(maxp, 12, static_cast<std::uint16_t>(maxCompositeContours));
+		WriteU16(maxp, 28, static_cast<std::uint16_t>(maxComponentElements));
+		WriteU16(maxp, 30, static_cast<std::uint16_t>(maxComponentDepth));
 		std::vector<std::uint8_t> post(32, 0);
 		const auto sourcePost = font.Tables.find(TagPost);
 		if (sourcePost != font.Tables.end() && sourcePost->second.Length >= post.size())
@@ -759,6 +1163,22 @@ namespace PdfWriter
 			return false;
 		}
 		return true;
+	}
+
+	bool TryBuildSourceBackedLogicalTrueType(const std::vector<std::uint8_t>& source,
+	                                         const CLogicalFontShard& shard,
+	                                         CLogicalTrueTypeSubsetResult& result,
+	                                         CLogicalTrueTypeSubsetError& error)
+	{
+		return TryBuildLogicalTrueTypeImpl(source, shard, false, result, error);
+	}
+
+	bool TryBuildLogicalTrueType(const std::vector<std::uint8_t>& source,
+	                             const CLogicalFontShard& shard,
+	                             CLogicalTrueTypeSubsetResult& result,
+	                             CLogicalTrueTypeSubsetError& error)
+	{
+		return TryBuildLogicalTrueTypeImpl(source, shard, true, result, error);
 	}
 
 	bool TryGetTrueTypeGlyphAdvance(const std::vector<std::uint8_t>& fontData,

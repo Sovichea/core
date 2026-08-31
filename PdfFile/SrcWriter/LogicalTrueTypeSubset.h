@@ -51,6 +51,10 @@ namespace PdfWriter
 		UnsupportedVisual,
 		InvalidSourceGlyph,
 		AdvanceWidthMismatch,
+		ComponentCoordinateOverflow,
+		SyntheticBoundsOverflow,
+		SyntheticResourceOverflow,
+		InvalidAdvanceWidth,
 		InvalidCidRecord,
 		CompositeCycle,
 		TooManyGlyphs,
@@ -76,6 +80,7 @@ namespace PdfWriter
 		std::uint16_t UnitsPerEm = 0;
 		std::vector<std::uint32_t> SourceGidToSubsetGid;
 		std::vector<std::uint32_t> VisualRecordToSubsetGid;
+		std::vector<bool> VisualRecordIsSynthetic;
 		std::vector<std::uint32_t> CidToSubsetGid;
 	};
 
@@ -83,6 +88,11 @@ namespace PdfWriter
 	                                         const CLogicalFontShard& shard,
 	                                         CLogicalTrueTypeSubsetResult& result,
 	                                         CLogicalTrueTypeSubsetError& error);
+
+	bool TryBuildLogicalTrueType(const std::vector<std::uint8_t>& source,
+	                             const CLogicalFontShard& shard,
+	                             CLogicalTrueTypeSubsetResult& result,
+	                             CLogicalTrueTypeSubsetError& error);
 
 	bool TryGetTrueTypeGlyphAdvance(const std::vector<std::uint8_t>& fontData,
 	                                std::uint32_t glyphId,

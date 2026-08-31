@@ -69,6 +69,23 @@ namespace PdfWriter
 			return glyph;
 		}
 
+		std::vector<std::uint8_t> MakeLargeSimpleGlyph(std::uint32_t pointCount)
+		{
+			std::vector<std::uint8_t> glyph(10, 0);
+			WriteU16(glyph, 0, 1);
+			AppendU16(glyph, static_cast<std::uint16_t>(pointCount - 1));
+			AppendU16(glyph, 0);
+			std::uint32_t remaining = pointCount;
+			while (remaining != 0)
+			{
+				const std::uint32_t run = std::min<std::uint32_t>(remaining, 256);
+				glyph.push_back(0x39u);
+				glyph.push_back(static_cast<std::uint8_t>(run - 1));
+				remaining -= run;
+			}
+			return glyph;
+		}
+
 		std::vector<std::uint8_t> MakeCompositeGlyph(const std::vector<std::uint16_t>& components)
 		{
 			std::vector<std::uint8_t> glyph(10, 0);
@@ -90,7 +107,8 @@ namespace PdfWriter
 		                                        bool includeNestedComposite,
 		                                        bool includeCompositeChain = false,
 		                                        bool includeVariableTable = false,
-		                                        bool includeCompositeCycle = false)
+		                                        bool includeCompositeCycle = false,
+		                                        std::uint32_t largePointCount = 0)
 		{
 			std::vector<std::uint8_t> glyf;
 			std::vector<std::uint8_t> loca;
@@ -99,7 +117,9 @@ namespace PdfWriter
 			{
 				AppendU32(loca, static_cast<std::uint32_t>(glyf.size()));
 				std::vector<std::uint8_t> glyph;
-				if (includeCompositeCycle && gid + 1 == numGlyphs)
+				if (largePointCount != 0 && gid == 1)
+					glyph = MakeLargeSimpleGlyph(largePointCount);
+				else if (includeCompositeCycle && gid + 1 == numGlyphs)
 					glyph = MakeCompositeGlyph({static_cast<std::uint16_t>(gid)});
 				else if (includeCompositeChain && gid == 0)
 					glyph = MakeSimpleGlyph();
@@ -308,6 +328,25 @@ namespace PdfWriter
 		WriteSubsetFixture("phase3-material-icons.ttf", result.FontData);
 	}
 
+	TEST(LogicalTrueTypeSubset, SyntheticVisualRetainsSourceCompositeClosure)
+	{
+		const std::vector<std::uint8_t> source = BuildTestFont(5, true);
+		CLogicalFontMapper mapper;
+		MapSourceGlyph(mapper, U"A", 4, 504, 10, -20);
+		CLogicalTrueTypeSubsetResult result;
+		CLogicalTrueTypeSubsetError error;
+		ASSERT_TRUE(TryBuildLogicalTrueType(source, mapper.GetShard(), result, error)) << error.Message;
+
+		EXPECT_TRUE(result.VisualRecordIsSynthetic[1]);
+		EXPECT_EQ(5u, result.VisualRecordToSubsetGid[1]);
+		EXPECT_NE(CLogicalTrueTypeSubsetResult::UnmappedGlyph, result.SourceGidToSubsetGid[4]);
+		EXPECT_NE(CLogicalTrueTypeSubsetResult::UnmappedGlyph, result.SourceGidToSubsetGid[3]);
+		EXPECT_NE(CLogicalTrueTypeSubsetResult::UnmappedGlyph, result.SourceGidToSubsetGid[1]);
+		EXPECT_NE(CLogicalTrueTypeSubsetResult::UnmappedGlyph, result.SourceGidToSubsetGid[2]);
+		const auto tables = ReadTables(result.FontData);
+		EXPECT_EQ(6u, ReadU16(result.FontData, tables.at(MakeTag('m', 'a', 'x', 'p')).first + 4));
+	}
+
 	TEST(LogicalTrueTypeSubset, RejectsNonSourceBackedVisualsAndChangedAdvance)
 	{
 		const std::vector<std::uint8_t> source = BuildTestFont(5, true);
@@ -364,6 +403,43 @@ namespace PdfWriter
 		EXPECT_EQ(CLogicalTrueTypeSubsetErrorCode::MalformedLoca, error.Code);
 	}
 
+	TEST(LogicalTrueTypeSubset, RejectsUnrepresentableCompactHheaExtrema)
+	{
+		std::vector<std::uint8_t> source = BuildTestFont(2, false, false, false, false, 1);
+		const auto tables = ReadTables(source);
+		WriteU16(source, tables.at(MakeTag('h', 'm', 't', 'x')).first + 4, 65535);
+		CLogicalFontMapper mapper;
+		MapSourceGlyph(mapper, U"A", 1, 65535);
+		CLogicalTrueTypeSubsetResult result;
+		CLogicalTrueTypeSubsetError error;
+
+		EXPECT_FALSE(TryBuildSourceBackedLogicalTrueType(source, mapper.GetShard(), result, error));
+		EXPECT_EQ(CLogicalTrueTypeSubsetErrorCode::MalformedHhea, error.Code);
+	}
+
+	TEST(LogicalTrueTypeSubset, EnforcesSimpleGlyphPointLimit)
+	{
+		const std::vector<std::uint8_t> boundary = BuildTestFont(2, false, false, false, false, 65535);
+		CLogicalFontMapper boundaryMapper;
+		MapSourceGlyph(boundaryMapper, U"A", 1, 501);
+		const CLogicalTrueTypeSubsetResult valid = BuildSubset(boundary, boundaryMapper.GetShard());
+		const auto tables = ReadTables(valid.FontData);
+		EXPECT_EQ(65535u,
+		          ReadU16(valid.FontData, tables.at(MakeTag('m', 'a', 'x', 'p')).first + 6));
+
+		const std::vector<std::uint8_t> overflow = BuildTestFont(2, false, false, false, false, 65536);
+		CLogicalTrueTypeSubsetResult result;
+		CLogicalTrueTypeSubsetError error;
+		EXPECT_FALSE(TryBuildSourceBackedLogicalTrueType(
+			overflow, boundaryMapper.GetShard(), result, error));
+		EXPECT_EQ(CLogicalTrueTypeSubsetErrorCode::MalformedMaxp, error.Code);
+
+		CLogicalFontMapper syntheticMapper;
+		MapSourceGlyph(syntheticMapper, U"A", 1, 500);
+		EXPECT_FALSE(TryBuildLogicalTrueType(overflow, syntheticMapper.GetShard(), result, error));
+		EXPECT_EQ(CLogicalTrueTypeSubsetErrorCode::MalformedMaxp, error.Code);
+	}
+
 	TEST(LogicalTrueTypeSubset, RejectsVariableFonts)
 	{
 		const std::vector<std::uint8_t> source = BuildTestFont(5, false, false, true);
@@ -411,6 +487,7 @@ namespace PdfWriter
 		EXPECT_EQ(first.FontData, second.FontData);
 		EXPECT_EQ(first.SourceGidToSubsetGid, second.SourceGidToSubsetGid);
 		EXPECT_EQ(first.VisualRecordToSubsetGid, second.VisualRecordToSubsetGid);
+		EXPECT_EQ(first.VisualRecordIsSynthetic, second.VisualRecordIsSynthetic);
 		EXPECT_EQ(first.CidToSubsetGid, second.CidToSubsetGid);
 	}
 }

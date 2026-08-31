@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace PdfWriter
@@ -44,6 +45,18 @@ namespace PdfWriter
 			mapper.Map(plan);
 		}
 
+		void MapSyntheticGlyph(CLogicalFontMapper& mapper,
+		                       const std::u32string& text,
+		                       int advance,
+		                       std::vector<CLogicalComponent> components)
+		{
+			CLogicalUnitPlan plan;
+			plan.Text = text;
+			plan.Visual.AdvanceWidth = advance;
+			plan.Visual.Components = std::move(components);
+			mapper.Map(plan);
+		}
+
 		CLogicalType0FontResult BuildType0(const std::vector<std::uint8_t>& source,
 		                                   const CLogicalFontShard& shard)
 		{
@@ -64,7 +77,10 @@ namespace PdfWriter
 			return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 		}
 
-		void WritePdfFixture(const CLogicalType0FontResult& font)
+		void WritePdfFixture(const CLogicalType0FontResult& font,
+		                     const std::string& fileName,
+		                     const std::string& subsetName,
+		                     const std::string& codes)
 		{
 			std::ostringstream widths;
 			widths << "/W [1 [";
@@ -72,19 +88,19 @@ namespace PdfWriter
 				widths << font.Widths[cid] << ' ';
 			widths << "]]";
 
-			const std::string content = "BT\n/F1 24 Tf\n72 700 Td\n<00010002> Tj\nET\n";
+			const std::string content = "BT\n/F1 24 Tf\n72 700 Td\n<" + codes + "> Tj\nET\n";
 			std::vector<std::string> objects(11);
 			objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
 			objects[2] = "<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
 			objects[3] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
 			             "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>";
 			objects[4] = MakeStream("", content);
-			objects[5] = "<< /Type /Font /Subtype /Type0 /BaseFont /ABCDEF+Phase3Subset "
-			             "/Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 10 0 R >>";
-			objects[6] = "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /ABCDEF+Phase3Subset "
-			             "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> "
+			objects[5] = "<< /Type /Font /Subtype /Type0 /BaseFont /" + subsetName +
+			             " /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 10 0 R >>";
+			objects[6] = "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" + subsetName +
+			             " /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> "
 			             "/FontDescriptor 7 0 R /CIDToGIDMap 9 0 R /DW 1000 " + widths.str() + " >>";
-			objects[7] = "<< /Type /FontDescriptor /FontName /ABCDEF+Phase3Subset /Flags 4 "
+			objects[7] = "<< /Type /FontDescriptor /FontName /" + subsetName + " /Flags 4 "
 			             "/FontBBox [-1000 -1000 2000 2000] /ItalicAngle 0 /Ascent 1000 "
 			             "/Descent -200 /CapHeight 700 /StemV 80 /FontFile2 8 0 R >>";
 			objects[8] = MakeStream(" /Length1 " + std::to_string(font.FontFile2.size()),
@@ -109,13 +125,11 @@ namespace PdfWriter
 			     << "startxref\n" << xrefOffset << "\n%%EOF\n";
 			pdf += xref.str();
 
-			EXPECT_NE(std::string::npos, pdf.find("/BaseFont /ABCDEF+Phase3Subset"));
-			EXPECT_NE(std::string::npos, pdf.find("/FontName /ABCDEF+Phase3Subset"));
-			EXPECT_NE(std::string::npos, pdf.find("<00010002> Tj"));
-			EXPECT_NE(std::string::npos, pdf.find("<0001> <0041>"));
-			EXPECT_NE(std::string::npos, pdf.find("<0002> <0042>"));
+			EXPECT_NE(std::string::npos, pdf.find("/BaseFont /" + subsetName));
+			EXPECT_NE(std::string::npos, pdf.find("/FontName /" + subsetName));
+			EXPECT_NE(std::string::npos, pdf.find("<" + codes + "> Tj"));
 
-			std::ofstream stream("phase3-source-backed.pdf", std::ios::binary);
+			std::ofstream stream(fileName, std::ios::binary);
 			ASSERT_TRUE(stream.good());
 			stream.write(pdf.data(), static_cast<std::streamsize>(pdf.size()));
 			ASSERT_TRUE(stream.good());
@@ -200,6 +214,19 @@ namespace PdfWriter
 		MapSourceGlyph(mapper, U"A", glyphId, advance);
 		MapSourceGlyph(mapper, U"B", glyphId, advance);
 		const CLogicalType0FontResult result = BuildType0(source, mapper.GetShard());
-		WritePdfFixture(result);
+		WritePdfFixture(result, "phase3-source-backed.pdf", "ABCDEF+Phase3Subset", "00010002");
+	}
+
+	TEST(LogicalType0Font, WritesSyntheticMultiComponentPdfFixture)
+	{
+		const std::vector<std::uint8_t> source = ReadSourceFont();
+		ASSERT_FALSE(source.empty());
+		CLogicalFontMapper mapper;
+		MapSyntheticGlyph(mapper, U"AB", 2800, {{13, 0, 0}, {14, 1000, 0}});
+		const CLogicalType0FontResult result = BuildType0(source, mapper.GetShard());
+		ASSERT_EQ(4u, result.CIDToGIDMap.size());
+		EXPECT_EQ(3u, result.CIDToGIDMap[3]);
+		EXPECT_NE(std::string::npos, result.ToUnicode.find("<0001> <00410042>"));
+		WritePdfFixture(result, "phase4-synthetic.pdf", "ABCDEF+Phase4Synthetic", "0001");
 	}
 }

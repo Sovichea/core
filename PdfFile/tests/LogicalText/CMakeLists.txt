@@ -11,6 +11,7 @@ add_core_gtest(
     SOURCES
         LogicalFontMapperTest.cpp
         LogicalTextTest.cpp
+        LogicalSyntheticTrueTypeTest.cpp
         LogicalTrueTypeSubsetTest.cpp
         LogicalType0FontTest.cpp
         ${CORE_ROOT_DIR}/PdfFile/SrcWriter/LogicalFontMapper.cpp
