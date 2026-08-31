@@ -35,6 +35,7 @@
 #include "Annotation.h"
 #include "Image.h"
 #include "Font14.h"
+#include "LogicalPdfFont.h"
 #include "FontCidTT.h"
 #include "FontTT.h"
 #include "FontTTWriter.h"
@@ -918,6 +919,10 @@ namespace PdfWriter
 				return (CFontEmbedded*)oInfo.pFont;
 		}
 		return NULL;
+	}
+	CLogicalPdfFont* CDocument::CreateLogicalPdfFont(const CLogicalType0FontResult& result, const std::string& fontName, std::string* error)
+	{
+		return CLogicalPdfFont::Create(m_pXref, this, result, fontName, error);
 	}
 	CFontCidTrueType* CDocument::CreateCidTrueTypeFont(const std::wstring& wsFontPath, unsigned int unIndex)
 	{

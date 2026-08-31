@@ -612,6 +612,12 @@ int CPdfFile::SaveToFile(const std::wstring& wsPath)
 		return 1;
 	return m_pInternal->pWriter->SaveToFile(wsPath);
 }
+std::string CPdfFile::GetLastLogicalTextDiagnostic() const
+{
+	if (!m_pInternal->pWriter)
+		return "PDF writer is not initialized";
+	return m_pInternal->pWriter->GetLastLogicalTextDiagnostic();
+}
 void CPdfFile::SetPassword(const std::wstring& wsPassword)
 {
 	if (m_pInternal->pWriter)

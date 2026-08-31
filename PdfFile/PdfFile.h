@@ -158,6 +158,7 @@ public:
 
 	void CreatePdf    (bool isPDFA = false);
 	int  SaveToFile   (const std::wstring& wsPath);
+	std::string GetLastLogicalTextDiagnostic() const;
 	void RotatePage   (int nRotate);
 	void SetPassword  (const std::wstring& wsPassword);
 	void SetDocumentID(const std::wstring& wsDocumentID);

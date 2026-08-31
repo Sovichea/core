@@ -69,6 +69,8 @@ namespace PdfWriter
 	class CFontDict;
 	class CFont14;
 	class CFontEmbedded;
+	class CLogicalPdfFont;
+	struct CLogicalType0FontResult;
 	class CFontCidTrueType;
 	class CFontTrueType;
 	class CJbig2Global;
@@ -151,6 +153,7 @@ namespace PdfWriter
 		CFontEmbedded*    CreateFontEmbedded(const std::wstring& wsFontPath, unsigned int unIndex, const std::string& sFontKey, EFontType nType, CObjectBase* pObj,
 											 const std::map<unsigned int, unsigned int>& mCodeToWidth, const std::map<unsigned int, unsigned int>& mCodeToUnicode, const std::map<unsigned int, unsigned int>& mCodeToGID);
 		CFontEmbedded*    FindFontEmbedded  (const std::wstring& wsFontPath, unsigned int unIndex);
+		CLogicalPdfFont*  CreateLogicalPdfFont(const CLogicalType0FontResult& result, const std::string& fontName, std::string* error = NULL);
 		CFontCidTrueType* CreateCidTrueTypeFont(const std::wstring& wsFontPath, unsigned int unIndex);
 		CFontCidTrueType* FindCidTrueTypeFont(const std::wstring& wsFontPath, unsigned int unIndex);
 		CFontTrueType*    CreateTrueTypeFont(const std::wstring& wsFontPath, unsigned int unIndex);

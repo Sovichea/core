@@ -165,7 +165,15 @@ HEADERS += \
     SrcWriter/Metadata.h \
     SrcWriter/ICCProfile.h \
 	SrcWriter/States.h \
-	SrcWriter/RedactOutputDev.h
+	SrcWriter/RedactOutputDev.h \
+	SrcWriter/LogicalFontMapper.h \
+	SrcWriter/LogicalFontSharding.h \
+	SrcWriter/LogicalMetafileAdapter.h \
+	SrcWriter/LogicalPdfFont.h \
+	SrcWriter/LogicalText.h \
+	SrcWriter/LogicalTextSerializer.h \
+	SrcWriter/LogicalTrueTypeSubset.h \
+	SrcWriter/LogicalType0Font.h
 
 SOURCES += \
     SrcWriter/AcroForm.cpp \
@@ -195,7 +203,15 @@ SOURCES += \
     SrcWriter/Utils.cpp \
     SrcWriter/Metadata.cpp \
 	SrcWriter/States.cpp \
-	SrcWriter/RedactOutputDev.cpp
+	SrcWriter/RedactOutputDev.cpp \
+	SrcWriter/LogicalFontMapper.cpp \
+	SrcWriter/LogicalFontSharding.cpp \
+	SrcWriter/LogicalMetafileAdapter.cpp \
+	SrcWriter/LogicalPdfFont.cpp \
+	SrcWriter/LogicalText.cpp \
+	SrcWriter/LogicalTextSerializer.cpp \
+	SrcWriter/LogicalTrueTypeSubset.cpp \
+	SrcWriter/LogicalType0Font.cpp
 
 # PdfFile
 

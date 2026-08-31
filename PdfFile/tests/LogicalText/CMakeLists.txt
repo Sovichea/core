@@ -12,6 +12,7 @@ add_core_gtest(
         LogicalFontMapperTest.cpp
         LogicalFontShardingTest.cpp
         LogicalMetafileAdapterTest.cpp
+        LogicalPdfWriterIntegrationTest.cpp
         LogicalUnitMetafileTest.cpp
         LogicalTextTest.cpp
         LogicalTextPdfTest.cpp
@@ -27,11 +28,16 @@ add_core_gtest(
         ${CORE_ROOT_DIR}/PdfFile/SrcWriter/LogicalTextSerializer.cpp
         ${CORE_ROOT_DIR}/PdfFile/SrcWriter/LogicalTrueTypeSubset.cpp
         ${CORE_ROOT_DIR}/PdfFile/SrcWriter/LogicalType0Font.cpp
+    LIBS
+        PdfFile
     GTEST_MAIN
 )
 
 target_include_directories(pdf_logical_text_test PRIVATE
     "${CORE_ROOT_DIR}/DesktopEditor/graphics"
+    "${CORE_ROOT_DIR}/DesktopEditor/freetype-2.10.4/include"
+    "${CORE_ROOT_DIR}/DesktopEditor/freetype-2.10.4/include/freetype"
+    "${CORE_ROOT_DIR}/PdfFile"
     "${CORE_ROOT_DIR}/PdfFile/SrcWriter"
 )
 

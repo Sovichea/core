@@ -34,6 +34,10 @@
 #include "SrcWriter/FontCidTT.h"
 #include "SrcWriter/FontTT.h"
 #include "SrcWriter/Font14.h"
+#include "SrcWriter/LogicalFontSharding.h"
+#include "SrcWriter/LogicalMetafileAdapter.h"
+#include "SrcWriter/LogicalPdfFont.h"
+#include "SrcWriter/LogicalType0Font.h"
 #include "SrcWriter/Destination.h"
 #include "SrcWriter/Field.h"
 #include "SrcWriter/Outline.h"
@@ -52,6 +56,9 @@
 #include "../DesktopEditor/raster/Metafile/MetaFileCommon.h"
 
 #include "../UnicodeConverter/UnicodeConverter.h"
+
+#include <map>
+#include <memory>
 #ifndef BUILDING_WASM_MODULE
 #include "../Common/Network/FileTransporter/include/FileTransporter.h"
 #endif
@@ -146,6 +153,50 @@ Aggplus::CImage* ConvertMetafile(NSFonts::IApplicationFonts* pAppFonts, const st
 	return new Aggplus::CImage(wsPath);
 }
 
+namespace
+{
+	struct CLogicalSourceFontKey
+	{
+		std::wstring Path;
+		LONG FaceIndex = 0;
+
+		bool operator<(const CLogicalSourceFontKey& other) const
+		{
+			return Path < other.Path || (Path == other.Path && FaceIndex < other.FaceIndex);
+		}
+	};
+
+	struct CLogicalSourceFontState
+	{
+		std::vector<std::uint8_t> Source;
+		std::unique_ptr<PdfWriter::CShardedLogicalFontMapper> Mapper;
+		std::vector<PdfWriter::CLogicalPdfFont*> LatestFonts;
+		std::vector<std::size_t> PublishedSemanticCounts;
+		unsigned int UnitsPerEm = 0;
+		bool Unsupported = false;
+		std::string UnsupportedReason;
+	};
+
+	std::string MakeLogicalSubsetFontName(unsigned int id)
+	{
+		std::string prefix(6, 'A');
+		for (std::size_t index = prefix.size(); index > 0; --index)
+		{
+			prefix[index - 1] = static_cast<char>('A' + id % 26);
+			id /= 26;
+		}
+		return prefix + "+Logical";
+	}
+}
+
+class CLogicalPdfWriterState
+{
+public:
+	std::map<CLogicalSourceFontKey, CLogicalSourceFontState> Fonts;
+	unsigned int FontCounter = 0;
+	std::string LastDiagnostic;
+};
+
 //----------------------------------------------------------------------------------------
 //
 // CPdfRenderer
@@ -159,6 +210,7 @@ CPdfWriter::CPdfWriter(NSFonts::IApplicationFonts* pAppFonts, bool isPDFA, IRend
 	pMeasurerCache->SetStreams(pAppFonts->GetStreams());
 	m_pFontManager->SetOwnerCache(pMeasurerCache);
 	m_pRenderer = pRenderer;
+	m_pLogicalTextState = new CLogicalPdfWriterState();
 	m_bNeedAddHelvetica = true;
 	m_wsTempDirectory = wsTempDirectory;
 	m_pShading = NULL;
@@ -194,6 +246,12 @@ CPdfWriter::~CPdfWriter()
 {
 	RELEASEOBJECT(m_pDocument);
 	RELEASEINTERFACE(m_pFontManager);
+	RELEASEOBJECT(m_pLogicalTextState);
+}
+const std::string& CPdfWriter::GetLastLogicalTextDiagnostic() const
+{
+	static const std::string empty;
+	return m_pLogicalTextState ? m_pLogicalTextState->LastDiagnostic : empty;
 }
 void CPdfWriter::SetPassword(const std::wstring& wsPassword)
 {
@@ -830,8 +888,151 @@ HRESULT CPdfWriter::CommandDrawTextCHAR2(unsigned int* pUnicodes, const unsigned
 }
 HRESULT CPdfWriter::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit)
 {
-	UNUSED_VARIABLE(oUnit);
-	return S_FALSE;
+	auto fallback = [&](const std::string& reason) -> HRESULT
+	{
+		if (m_pLogicalTextState)
+			m_pLogicalTextState->LastDiagnostic = reason;
+		if (oUnit.Unicode.empty() || oUnit.Components.empty())
+			return S_FALSE;
+
+		for (std::size_t index = 0; index < oUnit.Components.size(); ++index)
+		{
+			const CRendererLogicalComponent& component = oUnit.Components[index];
+			const double x = oUnit.VisualX + component.RelativeX;
+			const double y = oUnit.VisualY + component.RelativeY;
+			HRESULT result = S_FALSE;
+			if (index == 0)
+			{
+				std::vector<unsigned int> unicode(oUnit.Unicode);
+				result = CommandDrawTextCHAR2(unicode.data(), static_cast<unsigned int>(unicode.size()),
+				                              component.SourceGid, x, y, 0, 0);
+			}
+			else
+			{
+				result = CommandDrawTextExCHAR(0x20, component.SourceGid, x, y, 0, 0);
+			}
+			if (result != S_OK)
+				return result;
+		}
+		return S_OK;
+	};
+
+	if (!IsPageValid() || !m_pLogicalTextState || oUnit.Unicode.empty() || oUnit.Components.empty())
+		return fallback("logical unit or PDF page state is invalid");
+	if (m_bNeedUpdateTextFont && !UpdateFont())
+		return fallback("active font could not be initialized");
+	if (m_pDocument->IsPDFA())
+		return fallback("logical PDF fonts are not yet qualified for PDF/A output");
+	if (!m_pFont || m_pFont14 || m_pFontEmbedded || m_oFont.IsNeedDoBold() || m_oFont.IsNeedDoItalic() ||
+	    m_oFont.GetSize() <= 0.0 || m_oFont.GetCharSpace() != 0.0)
+		return fallback("active text state is unsupported by logical PDF fonts");
+
+	std::wstring fontPath = m_oFont.GetPath();
+	LONG faceIndex = m_oFont.GetFaceIndex();
+	if (fontPath.empty() && !GetFontPath(m_oFont.GetName(), m_oFont.IsBold(), m_oFont.IsItalic(), fontPath, faceIndex))
+		return fallback("source font path could not be resolved");
+	if (fontPath.empty() || faceIndex != 0)
+		return fallback("logical PDF fonts currently require a standalone face at index zero");
+
+	CLogicalSourceFontKey key{fontPath, faceIndex};
+	CLogicalSourceFontState& sourceState = m_pLogicalTextState->Fonts[key];
+	if (sourceState.Unsupported)
+		return fallback(sourceState.UnsupportedReason);
+	if (!sourceState.Mapper)
+	{
+		if (!m_pFontManager->LoadFontFromFile(fontPath, faceIndex, m_oFont.GetSize(), 72, 72) ||
+		    !m_pFontManager->GetFile())
+		{
+			sourceState.Unsupported = true;
+			sourceState.UnsupportedReason = "source font could not be loaded";
+			return fallback(sourceState.UnsupportedReason);
+		}
+		if (!NSFonts::CFontInfo::CanEmbedForPreviewAndPrint(
+		        static_cast<USHORT>(m_pFontManager->GetFile()->GetEmbeddingLicenceType())))
+		{
+			sourceState.Unsupported = true;
+			sourceState.UnsupportedReason = "source font embedding rights prohibit logical subsetting";
+			return fallback(sourceState.UnsupportedReason);
+		}
+
+		const int unitsPerEm = m_pFontManager->GetFile()->Units_Per_Em();
+		BYTE* data = NULL;
+		DWORD size = 0;
+		if (unitsPerEm <= 0 || !NSFile::CFileBinary::ReadAllBytes(fontPath, &data, size) || !data || size == 0)
+		{
+			RELEASEARRAYOBJECTS(data);
+			sourceState.Unsupported = true;
+			sourceState.UnsupportedReason = "source font bytes or units-per-em could not be read";
+			return fallback(sourceState.UnsupportedReason);
+		}
+		sourceState.Source.assign(data, data + size);
+		RELEASEARRAYOBJECTS(data);
+		sourceState.UnitsPerEm = static_cast<unsigned int>(unitsPerEm);
+		sourceState.Mapper.reset(new PdfWriter::CShardedLogicalFontMapper(sourceState.Source));
+	}
+
+	const double rendererUnitsToEm = MM_2_PT(1.0) / m_oFont.GetSize();
+	CRendererLogicalUnit normalized = oUnit;
+	normalized.LogicalAdvance *= rendererUnitsToEm;
+	for (CRendererLogicalComponent& component : normalized.Components)
+	{
+		component.RelativeX *= rendererUnitsToEm;
+		component.RelativeY *= rendererUnitsToEm;
+	}
+
+	PdfWriter::CLogicalUnitPlan plan;
+	PdfWriter::CLogicalMetafileAdapterError adapterError;
+	if (!PdfWriter::TryPlanLogicalMetafileUnit(normalized, sourceState.UnitsPerEm, plan, adapterError))
+		return fallback("logical metafile adapter rejected unit: " + adapterError.Message);
+
+	PdfWriter::CShardedLogicalFontMapping mapping;
+	PdfWriter::CLogicalFontShardingError shardingError;
+	if (!sourceState.Mapper->TryMap(plan, mapping, shardingError))
+		return fallback("logical font sharding failed: " + shardingError.Message);
+
+	const PdfWriter::CLogicalFontShard* shard = sourceState.Mapper->GetShard(mapping.ShardIndex);
+	if (!shard)
+		return fallback("logical font mapper returned an invalid shard");
+	if (sourceState.LatestFonts.size() <= mapping.ShardIndex)
+	{
+		sourceState.LatestFonts.resize(mapping.ShardIndex + 1, NULL);
+		sourceState.PublishedSemanticCounts.resize(mapping.ShardIndex + 1, 0);
+	}
+	PdfWriter::CLogicalPdfFont* logicalFont = sourceState.LatestFonts[mapping.ShardIndex];
+	const std::size_t semanticCount = shard->GetSemanticCount();
+	if (!logicalFont || sourceState.PublishedSemanticCounts[mapping.ShardIndex] != semanticCount)
+	{
+		PdfWriter::CLogicalType0FontResult fontResult;
+		PdfWriter::CLogicalType0FontError fontError;
+		if (!PdfWriter::TryBuildLogicalType0Font(sourceState.Source, *shard, fontResult, fontError))
+			return fallback("logical Type 0 font construction failed: " + fontError.Message);
+
+		const unsigned int fontId = ++m_pLogicalTextState->FontCounter;
+		const std::string fontName = MakeLogicalSubsetFontName(fontId);
+		std::string bridgeError;
+		logicalFont = m_pDocument->CreateLogicalPdfFont(fontResult, fontName, &bridgeError);
+		if (!logicalFont)
+			return fallback("logical PDF font bridge failed: " + bridgeError);
+		sourceState.LatestFonts[mapping.ShardIndex] = logicalFont;
+		sourceState.PublishedSemanticCounts[mapping.ShardIndex] = semanticCount;
+	}
+
+	unsigned char* codes = new unsigned char[2];
+	codes[0] = static_cast<unsigned char>(mapping.FontMapping.Cid >> 8);
+	codes[1] = static_cast<unsigned char>(mapping.FontMapping.Cid);
+	CTransform& transform = m_oTransform;
+	m_oCommandManager.SetTransform(transform.m11, -transform.m12, -transform.m21, transform.m22,
+	                               MM_2_PT(transform.dx + transform.m21 * m_dPageHeight),
+	                               MM_2_PT(m_dPageHeight - m_dPageHeight * transform.m22 - transform.dy));
+	CRendererTextCommand* text = m_oCommandManager.AddText(codes, 2, MM_2_PT(oUnit.VisualX),
+	                                                       MM_2_PT(m_dPageHeight - oUnit.VisualY));
+	text->SetFont(logicalFont);
+	text->SetSize(m_oFont.GetSize());
+	text->SetColor(m_oBrush.GetColor1());
+	text->SetAlpha((BYTE)m_oBrush.GetAlpha1());
+	m_bNeedAddHelvetica = false;
+	m_pLogicalTextState->LastDiagnostic.clear();
+	return S_OK;
 }
 //----------------------------------------------------------------------------------------
 // Command markers

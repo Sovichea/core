@@ -57,6 +57,8 @@ namespace Aggplus
 	class CImage;
 }
 
+class CLogicalPdfWriterState;
+
 class CPdfWriter
 {
 public:
@@ -64,6 +66,7 @@ public:
 	~CPdfWriter();
 	int          SaveToFile(const std::wstring& wsPath);
 	int          SaveToMemory(BYTE** pData, int* pLength);
+	const std::string& GetLastLogicalTextDiagnostic() const;
 	void         SetPassword(const std::wstring& wsPassword);
 	void         SetDocumentID(const std::wstring& wsDocumentID);
 	void         SetDocumentInfo(const std::wstring& wsTitle, const std::wstring& wsCreator, const std::wstring& wsSubject, const std::wstring& wsKeywords);
@@ -300,6 +303,7 @@ private:
 
 	bool                         m_bValid;
 	bool                         m_bSplit;
+	CLogicalPdfWriterState*      m_pLogicalTextState;
 
 	friend class PdfWriter::RedactOutputDev;
 };
