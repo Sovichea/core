@@ -305,6 +305,7 @@ add_library(PdfFile SHARED
     SrcWriter/LogicalFontMapper.h
     SrcWriter/LogicalFontSharding.h
     SrcWriter/LogicalText.h
+    SrcWriter/LogicalTextSerializer.h
     SrcWriter/LogicalTrueTypeSubset.h
     SrcWriter/LogicalType0Font.h
     SrcWriter/Metadata.h
@@ -340,6 +341,7 @@ add_library(PdfFile SHARED
     SrcWriter/LogicalFontMapper.cpp
     SrcWriter/LogicalFontSharding.cpp
     SrcWriter/LogicalText.cpp
+    SrcWriter/LogicalTextSerializer.cpp
     SrcWriter/LogicalTrueTypeSubset.cpp
     SrcWriter/LogicalType0Font.cpp
     SrcWriter/Metadata.cpp
