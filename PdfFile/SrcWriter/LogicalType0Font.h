@@ -34,11 +34,25 @@
 
 namespace PdfWriter
 {
+	enum class ELogicalPdfWritingMode
+	{
+		Horizontal,
+		Vertical
+	};
+
+	struct CLogicalVerticalMetric
+	{
+		int W1Y = 0;
+		int V1X = 0;
+		int V1Y = 880;
+	};
+
 	struct CLogicalType0FontMetadata
 	{
 		static constexpr const char* FontType = "Font";
 		static constexpr const char* FontSubtype = "Type0";
-		static constexpr const char* Encoding = "Identity-H";
+		static constexpr const char* HorizontalEncoding = "Identity-H";
+		static constexpr const char* VerticalEncoding = "Identity-V";
 		static constexpr const char* DescendantFontSubtype = "CIDFontType2";
 	};
 
@@ -70,20 +84,30 @@ namespace PdfWriter
 	{
 		static constexpr const char* FontType = CLogicalType0FontMetadata::FontType;
 		static constexpr const char* FontSubtype = CLogicalType0FontMetadata::FontSubtype;
-		static constexpr const char* Encoding = CLogicalType0FontMetadata::Encoding;
+
 		static constexpr const char* DescendantFontSubtype = CLogicalType0FontMetadata::DescendantFontSubtype;
 
+		ELogicalPdfWritingMode WritingMode = ELogicalPdfWritingMode::Horizontal;
 		std::vector<std::uint8_t> FontFile2;
 		std::vector<std::uint8_t> CIDToGIDMap;
 		std::vector<int> Widths;
+		std::vector<CLogicalVerticalMetric> VerticalMetrics;
 		std::string ToUnicode;
+
+		const char* GetEncoding() const
+		{
+			return WritingMode == ELogicalPdfWritingMode::Vertical
+				? CLogicalType0FontMetadata::VerticalEncoding
+				: CLogicalType0FontMetadata::HorizontalEncoding;
+		}
 	};
 
 	bool TryBuildLogicalType0Font(const std::vector<std::uint8_t>& source,
 	                              const CLogicalFontShard& shard,
 	                              CLogicalType0FontResult& result,
 	                              CLogicalType0FontError& error,
-	                              const std::string& fontName = std::string());
+	                              const std::string& fontName = std::string(),
+	                              ELogicalPdfWritingMode writingMode = ELogicalPdfWritingMode::Horizontal);
 }
 
 #endif

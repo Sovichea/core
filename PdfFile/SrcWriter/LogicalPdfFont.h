@@ -33,6 +33,10 @@ namespace PdfWriter
 		}
 
 		unsigned int GetWidth(unsigned short code) override;
+		bool IsVertical() const override
+		{
+			return m_writingMode == ELogicalPdfWritingMode::Vertical;
+		}
 		const std::string& GetFontName() const { return m_fontName; }
 		void SetWidth(unsigned short code, int width);
 		void SetWidths(const std::vector<int>& widths);
@@ -46,9 +50,12 @@ namespace PdfWriter
 		                const CLogicalPdfFontDescriptorMetrics& metrics);
 
 		void UpdateWidthsDictionary();
+		void UpdateVerticalMetricsDictionary();
 
 		std::string m_fontName;
+		ELogicalPdfWritingMode m_writingMode = ELogicalPdfWritingMode::Horizontal;
 		std::vector<int> m_widths;
+		std::vector<CLogicalVerticalMetric> m_verticalMetrics;
 		CDictObject* m_descendant = NULL;
 		CDictObject* m_descriptor = NULL;
 		CDictObject* m_fontFile = NULL;

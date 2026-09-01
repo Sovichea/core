@@ -77,6 +77,24 @@ namespace NSOnlineOfficeBinToPdf
 		}
 	}
 
+	TEST(LogicalUnitMetafile, RoundTripsVerticalWritingModeInVersionTwo)
+	{
+		CRendererLogicalUnit input = MakeUnit();
+		input.WritingMode = ERendererLogicalWritingMode::Vertical;
+		std::vector<unsigned char> record;
+		CLogicalUnitRecordError error;
+		ASSERT_TRUE(SerializeLogicalUnitRecord(input, record, &error)) << error.Message;
+		ASSERT_GE(record.size(), 8u);
+		EXPECT_EQ(LogicalUnitWritingModeVersion, record[4]);
+		EXPECT_EQ(1, record[5]);
+
+		CRendererLogicalUnit output;
+		ASSERT_EQ(ELogicalUnitRecordResult::Parsed, Parse(Payload(record), output, &error))
+			<< error.Message;
+		EXPECT_EQ(ERendererLogicalWritingMode::Vertical, output.WritingMode);
+		EXPECT_EQ(input.Unicode, output.Unicode);
+	}
+
 	TEST(LogicalUnitMetafile, UsesLittleEndianLengthAndFixedPointQuantization)
 	{
 		CRendererLogicalUnit input = MakeUnit();
@@ -133,7 +151,7 @@ namespace NSOnlineOfficeBinToPdf
 	{
 		std::vector<unsigned char> record;
 		ASSERT_TRUE(SerializeLogicalUnitRecord(MakeUnit(), record));
-		record[4] = 2;
+		record[4] = 3;
 		record.push_back(ctDrawTextCodeGid);
 		CBufferReader reader(record.data(), static_cast<int>(record.size()));
 		const unsigned char* payload = nullptr;
@@ -149,7 +167,7 @@ namespace NSOnlineOfficeBinToPdf
 
 	TEST(LogicalUnitMetafile, SkipsMinimalUnknownVersionRecord)
 	{
-		const std::vector<unsigned char> payload = {2};
+		const std::vector<unsigned char> payload = {3};
 		CRendererLogicalUnit unchanged = MakeUnit();
 		EXPECT_EQ(ELogicalUnitRecordResult::UnsupportedVersion, Parse(payload, unchanged));
 		EXPECT_EQ((std::vector<unsigned int>{0x41u, 0x1F600u, 0x0301u}), unchanged.Unicode);

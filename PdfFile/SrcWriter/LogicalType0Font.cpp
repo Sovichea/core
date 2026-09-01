@@ -196,7 +196,8 @@ namespace PdfWriter
 	                                  const CLogicalFontShard& shard,
 	                                  CLogicalType0FontResult& result,
 	                                  CLogicalType0FontError& error,
-	                                  const std::string& fontName)
+	                                  const std::string& fontName,
+	                                  ELogicalPdfWritingMode writingMode)
 	{
 		error = CLogicalType0FontError();
 		std::vector<const CLogicalCidRecord*> records;
@@ -221,9 +222,12 @@ namespace PdfWriter
 			                "compact subset mapped reserved CID 0 to a nonzero glyph");
 
 		CLogicalType0FontResult built;
+		built.WritingMode = writingMode;
 		built.FontFile2 = std::move(subset.FontData);
 		built.CIDToGIDMap.assign((cidCount + 1) * 2, 0);
 		built.Widths.assign(cidCount + 1, 0);
+		if (writingMode == ELogicalPdfWritingMode::Vertical)
+			built.VerticalMetrics.assign(cidCount + 1, CLogicalVerticalMetric());
 		for (std::size_t index = 1; index <= cidCount; ++index)
 		{
 			const std::uint32_t gid = subset.CidToSubsetGid[index];
@@ -236,6 +240,13 @@ namespace PdfWriter
 			const std::int64_t sourceWidth = records[index]->Width;
 			built.Widths[index] = static_cast<int>(
 				(sourceWidth * 1000 + subset.UnitsPerEm / 2) / subset.UnitsPerEm);
+			if (writingMode == ELogicalPdfWritingMode::Vertical)
+			{
+				CLogicalVerticalMetric& metric = built.VerticalMetrics[index];
+				metric.W1Y = -built.Widths[index];
+				metric.V1X = 0;
+				metric.V1Y = 0;
+			}
 		}
 
 		if (!BuildToUnicode(records, built.ToUnicode, error))

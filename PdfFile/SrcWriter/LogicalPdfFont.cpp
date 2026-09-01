@@ -193,6 +193,12 @@ namespace PdfWriter
 				return Fail(error, "logical PDF font maps reserved CID 0 to a nonzero GID");
 			if (result.Widths.size() != result.CIDToGIDMap.size() / 2)
 				return Fail(error, "logical PDF font widths do not match its CID count");
+			if (result.WritingMode == ELogicalPdfWritingMode::Vertical &&
+			    result.VerticalMetrics.size() != result.Widths.size())
+				return Fail(error, "logical vertical metrics do not match the CID count");
+			if (result.WritingMode == ELogicalPdfWritingMode::Horizontal &&
+			    !result.VerticalMetrics.empty())
+				return Fail(error, "logical horizontal font contains vertical metrics");
 			if (result.ToUnicode.empty())
 				return Fail(error, "logical PDF font has an empty ToUnicode CMap");
 			return ParseMetrics(result.FontFile2, metrics, error);
@@ -231,12 +237,13 @@ namespace PdfWriter
 	                                 const CLogicalType0FontResult& result,
 	                                 const std::string& fontName,
 	                                 const CLogicalPdfFontDescriptorMetrics& metrics)
-		: CFontDict(pXref, pDocument), m_fontName(fontName), m_widths(result.Widths)
+		: CFontDict(pXref, pDocument), m_fontName(fontName), m_writingMode(result.WritingMode),
+		  m_widths(result.Widths), m_verticalMetrics(result.VerticalMetrics)
 	{
 		Add("Type", CLogicalType0FontResult::FontType);
 		Add("Subtype", CLogicalType0FontResult::FontSubtype);
 		Add("BaseFont", fontName.c_str());
-		Add("Encoding", CLogicalType0FontResult::Encoding);
+		Add("Encoding", result.GetEncoding());
 
 		m_descendant = new CDictObject();
 		pXref->Add(m_descendant);
@@ -251,6 +258,7 @@ namespace PdfWriter
 		cidSystemInfo->Add("Supplement", 0);
 		m_descendant->Add("CIDSystemInfo", cidSystemInfo);
 		UpdateWidthsDictionary();
+		UpdateVerticalMetricsDictionary();
 
 		m_descriptor = new CDictObject();
 		pXref->Add(m_descriptor);
@@ -301,6 +309,33 @@ namespace PdfWriter
 		m_descendant->Add("W", widths);
 	}
 
+	void CLogicalPdfFont::UpdateVerticalMetricsDictionary()
+	{
+		m_descendant->Remove("DW2");
+		m_descendant->Remove("W2");
+		if (!IsVertical())
+			return;
+
+		CArrayObject* defaults = new CArrayObject();
+		defaults->Add(0);
+		defaults->Add(-1000);
+		m_descendant->Add("DW2", defaults);
+		if (m_verticalMetrics.size() <= 1)
+			return;
+
+		CArrayObject* metrics = new CArrayObject();
+		metrics->Add(1);
+		CArrayObject* consecutive = new CArrayObject();
+		for (std::size_t cid = 1; cid < m_verticalMetrics.size(); ++cid)
+		{
+			consecutive->Add(m_verticalMetrics[cid].W1Y);
+			consecutive->Add(m_verticalMetrics[cid].V1X);
+			consecutive->Add(m_verticalMetrics[cid].V1Y);
+		}
+		metrics->Add(consecutive);
+		m_descendant->Add("W2", metrics);
+	}
+
 	void CLogicalPdfFont::SetWidth(unsigned short code, int width)
 	{
 		if (m_widths.size() <= code)
@@ -322,7 +357,11 @@ namespace PdfWriter
 		if (!ValidateResult(result, m_fontName, metrics, error))
 			return false;
 
+		if (result.WritingMode != m_writingMode)
+			return Fail(error, "logical PDF font writing mode cannot change after publication");
+		m_verticalMetrics = result.VerticalMetrics;
 		SetWidths(result.Widths);
+		UpdateVerticalMetricsDictionary();
 		m_descriptor->Add("Flags", metrics.Flags);
 		CArrayObject* bbox = new CArrayObject();
 		for (int value : metrics.BBox)

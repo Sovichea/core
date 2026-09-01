@@ -17,6 +17,7 @@
 namespace NSOnlineOfficeBinToPdf
 {
 	constexpr unsigned char LogicalUnitCommandVersion = 1;
+	constexpr unsigned char LogicalUnitWritingModeVersion = 2;
 	constexpr std::size_t MaximumLogicalUnitRecordBytes = 1024 * 1024;
 	constexpr std::size_t MaximumLogicalUnitUnicodeScalars = 4096;
 	constexpr std::size_t MaximumLogicalUnitComponents = 4096;

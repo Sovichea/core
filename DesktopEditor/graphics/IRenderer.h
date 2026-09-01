@@ -167,6 +167,12 @@ namespace Aggplus {
 	class CGraphicsPath;
 }
 
+enum class ERendererLogicalWritingMode : unsigned char
+{
+	Horizontal = 0,
+	Vertical = 1
+};
+
 struct CRendererLogicalComponent
 {
 	unsigned int SourceGid = 0;
@@ -177,6 +183,7 @@ struct CRendererLogicalComponent
 struct CRendererLogicalUnit
 {
 	std::vector<unsigned int> Unicode;
+	ERendererLogicalWritingMode WritingMode = ERendererLogicalWritingMode::Horizontal;
 	double LogicalAdvance = 0.0;
 	double VisualX = 0.0;
 	double VisualY = 0.0;

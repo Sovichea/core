@@ -148,7 +148,7 @@ namespace PdfWriter
 
 		const CLogicalType0FontResult result = BuildType0(source, mapper.GetShard());
 		EXPECT_STREQ("Type0", result.FontSubtype);
-		EXPECT_STREQ("Identity-H", result.Encoding);
+		EXPECT_STREQ("Identity-H", result.GetEncoding());
 		EXPECT_STREQ("CIDFontType2", result.DescendantFontSubtype);
 		ASSERT_EQ(8u, result.CIDToGIDMap.size());
 		EXPECT_EQ(0u, result.CIDToGIDMap[0]);
@@ -167,6 +167,26 @@ namespace PdfWriter
 		EXPECT_EQ(pdfWidth, result.Widths[1]);
 		EXPECT_EQ(pdfWidth, result.Widths[2]);
 		EXPECT_EQ(pdfWidth, result.Widths[3]);
+	}
+
+	TEST(LogicalType0Font, BuildsIdentityVWithExplicitVerticalMetrics)
+	{
+		const std::vector<std::uint8_t> source = ReadSourceFont();
+		ASSERT_FALSE(source.empty());
+		const int advance = GetAdvance(source);
+		CLogicalFontMapper mapper;
+		MapSourceGlyph(mapper, U"A", 1, advance);
+
+		CLogicalType0FontResult result;
+		CLogicalType0FontError error;
+		ASSERT_TRUE(TryBuildLogicalType0Font(source, mapper.GetShard(), result, error,
+		                                         std::string(), ELogicalPdfWritingMode::Vertical))
+			<< error.Message;
+		EXPECT_STREQ("Identity-V", result.GetEncoding());
+		ASSERT_EQ(2u, result.VerticalMetrics.size());
+		EXPECT_EQ(-result.Widths[1], result.VerticalMetrics[1].W1Y);
+		EXPECT_EQ(0, result.VerticalMetrics[1].V1X);
+		EXPECT_EQ(0, result.VerticalMetrics[1].V1Y);
 	}
 
 	TEST(LogicalType0Font, SplitsToUnicodeIntoBoundedBlocks)

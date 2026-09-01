@@ -242,3 +242,63 @@ TEST(LogicalPdfWriterIntegration, PreservesBidiSourceOrderAcrossNonmonotonicVisu
 	EXPECT_EQ(2u, CountOccurrences(pdf, "/BaseFont /AAAAAB+Logical"));
 	EXPECT_EQ(std::string::npos, pdf.find("/BaseFont /Helvetica"));
 }
+
+TEST(LogicalPdfWriterIntegration, PublishesSeparateIdentityHAndIdentityVFonts)
+{
+	const std::string sourcePath = SourceFontPath();
+	const std::vector<std::uint8_t> source = ReadBytes(sourcePath);
+	ASSERT_FALSE(source.empty());
+	std::uint16_t advance = 0;
+	PdfWriter::CLogicalTrueTypeSubsetError advanceError;
+	ASSERT_TRUE(PdfWriter::TryGetTrueTypeGlyphAdvance(source, 13, advance, advanceError))
+		<< advanceError.Message;
+
+	NSFonts::IApplicationFonts* fonts = NSFonts::NSApplication::Create();
+	ASSERT_NE(nullptr, fonts);
+	const std::string::size_type separator = sourcePath.find_last_of("/\\");
+	ASSERT_NE(std::string::npos, separator);
+	fonts->InitializeFromFolder(Widen(sourcePath.substr(0, separator)));
+
+	const std::string outputPath = "identity-v-logical-unit.pdf";
+	{
+		CPdfFile pdf(fonts);
+		pdf.CreatePdf();
+		ASSERT_EQ(S_OK, pdf.NewPage());
+		ASSERT_EQ(S_OK, pdf.put_FontPath(Widen(sourcePath)));
+		ASSERT_EQ(S_OK, pdf.put_FontFaceIndex(0));
+		ASSERT_EQ(S_OK, pdf.put_FontSize(18.0));
+		ASSERT_EQ(S_OK, pdf.put_FontStringGID(TRUE));
+
+		const double pointsPerMillimetre = 72.0 / 25.4;
+		const double logicalAdvance = static_cast<double>(advance) / 1000.0 * 18.0 / pointsPerMillimetre;
+		CRendererLogicalUnit horizontal;
+		horizontal.Unicode = {0x0041};
+		horizontal.LogicalAdvance = logicalAdvance;
+		horizontal.VisualX = 20.0;
+		horizontal.VisualY = 30.0;
+		horizontal.Components.push_back({13, 0.0, 0.0});
+		ASSERT_EQ(S_OK, pdf.CommandDrawTextLogicalUnit(horizontal));
+
+		CRendererLogicalUnit vertical = horizontal;
+		vertical.WritingMode = ERendererLogicalWritingMode::Vertical;
+		vertical.Unicode = {0x4E00};
+		vertical.VisualX = 50.0;
+		vertical.VisualY = 40.0;
+		ASSERT_EQ(S_OK, pdf.CommandDrawTextLogicalUnit(vertical));
+
+		const CLogicalTextMetrics metrics = pdf.GetLogicalTextMetrics();
+		EXPECT_EQ(2u, metrics.SourceFonts);
+		EXPECT_EQ(2u, metrics.Shards);
+		EXPECT_EQ(2u, metrics.FontPublications);
+		ASSERT_EQ(0, pdf.SaveToFile(Widen(outputPath))) << pdf.GetLastLogicalTextDiagnostic();
+	}
+	RELEASEINTERFACE(fonts);
+
+	const std::string pdf = ReadText(outputPath);
+	ASSERT_FALSE(pdf.empty());
+	EXPECT_NE(std::string::npos, pdf.find("/Encoding /Identity-H"));
+	EXPECT_NE(std::string::npos, pdf.find("/Encoding /Identity-V"));
+	EXPECT_NE(std::string::npos, pdf.find("/DW2"));
+	EXPECT_NE(std::string::npos, pdf.find("/W2"));
+	EXPECT_EQ(6u, CountOccurrences(pdf, "+Logical"));
+}

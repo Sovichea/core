@@ -48,6 +48,10 @@ namespace PdfWriter
 		{
 			return 0;
 		}
+		virtual bool IsVertical() const
+		{
+			return false;
+		}
 
 	protected:
 

@@ -141,7 +141,7 @@ namespace NSOnlineOfficeBinToPdf
 			SetError(error, reader.Offset(), "logical unit version is truncated");
 			return ELogicalUnitRecordResult::Malformed;
 		}
-		if (version != LogicalUnitCommandVersion)
+		if (version != LogicalUnitCommandVersion && version != LogicalUnitWritingModeVersion)
 			return ELogicalUnitRecordResult::UnsupportedVersion;
 		if (payloadSize < FixedPayloadBytes)
 		{
@@ -156,13 +156,17 @@ namespace NSOnlineOfficeBinToPdf
 			SetError(error, reader.Offset(), "logical unit version header is truncated");
 			return ELogicalUnitRecordResult::Malformed;
 		}
-		if (flags != 0 || reserved != 0)
+		if (reserved != 0 || (version == LogicalUnitCommandVersion && flags != 0) ||
+		    (version == LogicalUnitWritingModeVersion && flags > 1))
 		{
-			SetError(error, 1, "logical unit version 1 flags and reserved field must be zero");
+			SetError(error, 1, "logical unit writing mode or reserved field is invalid");
 			return ELogicalUnitRecordResult::Malformed;
 		}
 
 		CRendererLogicalUnit parsed;
+		parsed.WritingMode = version == LogicalUnitWritingModeVersion && flags == 1
+			? ERendererLogicalWritingMode::Vertical
+			: ERendererLogicalWritingMode::Horizontal;
 		std::uint32_t unicodeCount = 0;
 		if (!reader.ReadU32(unicodeCount) || unicodeCount == 0 ||
 		    unicodeCount > MaximumLogicalUnitUnicodeScalars ||
@@ -228,7 +232,9 @@ namespace NSOnlineOfficeBinToPdf
 	{
 		if (error != nullptr)
 			*error = CLogicalUnitRecordError();
-		if (unit.Unicode.empty() || unit.Unicode.size() > MaximumLogicalUnitUnicodeScalars ||
+		if ((unit.WritingMode != ERendererLogicalWritingMode::Horizontal &&
+		     unit.WritingMode != ERendererLogicalWritingMode::Vertical) ||
+		    unit.Unicode.empty() || unit.Unicode.size() > MaximumLogicalUnitUnicodeScalars ||
 		    unit.Components.empty() || unit.Components.size() > MaximumLogicalUnitComponents)
 			return SetError(error, 0, "logical unit counts are invalid");
 		for (std::uint32_t scalar : unit.Unicode)
@@ -266,8 +272,9 @@ namespace NSOnlineOfficeBinToPdf
 		std::vector<unsigned char> output;
 		output.reserve(recordSize);
 		AppendU32(output, static_cast<std::uint32_t>(recordSize));
-		output.push_back(LogicalUnitCommandVersion);
-		output.push_back(0);
+		const bool vertical = unit.WritingMode == ERendererLogicalWritingMode::Vertical;
+		output.push_back(vertical ? LogicalUnitWritingModeVersion : LogicalUnitCommandVersion);
+		output.push_back(vertical ? 1 : 0);
 		AppendU16(output, 0);
 		AppendU32(output, static_cast<std::uint32_t>(unit.Unicode.size()));
 		for (std::uint32_t scalar : unit.Unicode)

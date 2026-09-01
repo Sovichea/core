@@ -159,10 +159,15 @@ namespace
 	{
 		std::wstring Path;
 		LONG FaceIndex = 0;
+		ERendererLogicalWritingMode WritingMode = ERendererLogicalWritingMode::Horizontal;
 
 		bool operator<(const CLogicalSourceFontKey& other) const
 		{
-			return Path < other.Path || (Path == other.Path && FaceIndex < other.FaceIndex);
+			if (Path != other.Path)
+				return Path < other.Path;
+			if (FaceIndex != other.FaceIndex)
+				return FaceIndex < other.FaceIndex;
+			return WritingMode < other.WritingMode;
 		}
 	};
 
@@ -331,8 +336,12 @@ bool CPdfWriter::FinalizeLogicalFonts()
 
 			PdfWriter::CLogicalType0FontResult fontResult;
 			PdfWriter::CLogicalType0FontError fontError;
+			const PdfWriter::ELogicalPdfWritingMode writingMode =
+				fontEntry.first.WritingMode == ERendererLogicalWritingMode::Vertical
+					? PdfWriter::ELogicalPdfWritingMode::Vertical
+					: PdfWriter::ELogicalPdfWritingMode::Horizontal;
 			if (!PdfWriter::TryBuildLogicalType0Font(sourceState.Source, *shard, fontResult, fontError,
-			                                         logicalFont->GetFontName()))
+			                                         logicalFont->GetFontName(), writingMode))
 			{
 				m_pLogicalTextState->LastDiagnostic = "logical font finalization failed: " + fontError.Message;
 				return false;
@@ -1008,7 +1017,9 @@ HRESULT CPdfWriter::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit
 		return S_OK;
 	};
 
-	if (!IsPageValid() || !m_pLogicalTextState || oUnit.Unicode.empty() || oUnit.Components.empty())
+	if (!IsPageValid() || !m_pLogicalTextState || oUnit.Unicode.empty() || oUnit.Components.empty() ||
+	    (oUnit.WritingMode != ERendererLogicalWritingMode::Horizontal &&
+	     oUnit.WritingMode != ERendererLogicalWritingMode::Vertical))
 		return fallback("logical unit or PDF page state is invalid");
 	if (m_bNeedUpdateTextFont && !UpdateFont())
 		return fallback("active font could not be initialized");
@@ -1025,7 +1036,7 @@ HRESULT CPdfWriter::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit
 	if (fontPath.empty() || faceIndex != 0)
 		return fallback("logical PDF fonts currently require a standalone face at index zero");
 
-	CLogicalSourceFontKey key{fontPath, faceIndex};
+	CLogicalSourceFontKey key{fontPath, faceIndex, oUnit.WritingMode};
 	CLogicalSourceFontState& sourceState = m_pLogicalTextState->Fonts[key];
 	if (sourceState.Unsupported)
 		return fallback(sourceState.UnsupportedReason);
@@ -1098,7 +1109,12 @@ HRESULT CPdfWriter::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit
 		const std::string fontName = MakeLogicalSubsetFontName(fontId);
 		PdfWriter::CLogicalType0FontResult fontResult;
 		PdfWriter::CLogicalType0FontError fontError;
-		if (!PdfWriter::TryBuildLogicalType0Font(sourceState.Source, *shard, fontResult, fontError, fontName))
+		const PdfWriter::ELogicalPdfWritingMode writingMode =
+			oUnit.WritingMode == ERendererLogicalWritingMode::Vertical
+				? PdfWriter::ELogicalPdfWritingMode::Vertical
+				: PdfWriter::ELogicalPdfWritingMode::Horizontal;
+		if (!PdfWriter::TryBuildLogicalType0Font(sourceState.Source, *shard, fontResult, fontError,
+		                                         fontName, writingMode))
 			return fallback("logical Type 0 font construction failed: " + fontError.Message);
 		std::string bridgeError;
 		logicalFont = m_pDocument->CreateLogicalPdfFont(fontResult, fontName, &bridgeError);
@@ -1113,7 +1129,9 @@ HRESULT CPdfWriter::CommandDrawTextLogicalUnit(const CRendererLogicalUnit& oUnit
 	const PdfWriter::CLogicalCidRecord* cidRecord = shard->GetCidRecord(mapping.FontMapping.Cid);
 	if (!cidRecord)
 		return fallback("logical font shard has an incomplete width table");
-	logicalFont->SetWidth(static_cast<unsigned short>(mapping.FontMapping.Cid), cidRecord->Width);
+	const int pdfWidth = static_cast<int>((static_cast<std::int64_t>(cidRecord->Width) * 1000 +
+	                                      sourceState.UnitsPerEm / 2) / sourceState.UnitsPerEm);
+	logicalFont->SetWidth(static_cast<unsigned short>(mapping.FontMapping.Cid), pdfWidth);
 
 	unsigned char* codes = new unsigned char[2];
 	codes[0] = static_cast<unsigned char>(mapping.FontMapping.Cid >> 8);

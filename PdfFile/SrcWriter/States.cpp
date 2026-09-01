@@ -216,13 +216,16 @@ void CCommandManager::Flush()
                 double         dTextSize = pText->GetSize();
 				double         dWidth    = pText->GetFont() ? (pText->GetFont()->GetWidth(ushCode) / 1000.0 * dTextSize) : pText->GetWidth();
 
-                if (!oTextLine.Add(pCodes, unLen, dX, dY, dWidth, dTextSize))
+                if (pText->GetFont() && pText->GetFont()->IsVertical())
+                {
+                    oTextLine.Flush(pPage);
+                    pPage->DrawText(dX, dY, pCodes, unLen);
+                }
+                else if (!oTextLine.Add(pCodes, unLen, dX, dY, dWidth, dTextSize))
                 {
                     oTextLine.Flush(pPage);
                     if (!oTextLine.Add(pCodes, unLen, dX, dY, dWidth, dTextSize))
-                    {
                         pPage->DrawText(dX, dY, pCodes, unLen);
-                    }
                 }
 
 				if (!pText->GetPUA().empty())
