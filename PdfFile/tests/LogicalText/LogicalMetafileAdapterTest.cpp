@@ -42,6 +42,23 @@ namespace PdfWriter
 		}
 	}
 
+	TEST(LogicalMetafileAdapter, ConvertsRendererOffsetsToTrueTypeCoordinates)
+	{
+		CRendererLogicalUnit unit;
+		unit.Unicode = {0x1780u, 0x17B7u};
+		unit.LogicalAdvance = 1.0;
+		unit.Components = {{1, 0.25, -0.5}, {2, -0.75, 1.25}};
+
+		CLogicalUnitPlan plan;
+		CLogicalMetafileAdapterError error;
+		ASSERT_TRUE(TryPlanLogicalMetafileUnit(unit, 1000, plan, error)) << error.Message;
+		ASSERT_EQ(2u, plan.Visual.Components.size());
+		EXPECT_EQ(250, plan.Visual.Components[0].X);
+		EXPECT_EQ(500, plan.Visual.Components[0].Y);
+		EXPECT_EQ(-750, plan.Visual.Components[1].X);
+		EXPECT_EQ(-1250, plan.Visual.Components[1].Y);
+	}
+
 	TEST(LogicalMetafileAdapter, DrivesCompleteNativeRecordToLogicalPdfPipeline)
 	{
 		const std::vector<std::uint8_t> source = ReadSourceFont();

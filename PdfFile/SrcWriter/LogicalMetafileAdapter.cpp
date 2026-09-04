@@ -89,7 +89,7 @@ namespace PdfWriter
 			CLogicalComponent component;
 			component.GlyphId = source.SourceGid;
 			if (!TryRoundFontUnits(source.RelativeX, unitsPerEm, component.X) ||
-			    !TryRoundFontUnits(source.RelativeY, unitsPerEm, component.Y))
+			    !TryRoundFontUnits(-source.RelativeY, unitsPerEm, component.Y))
 				return SetError(error, CLogicalMetafileAdapterErrorCode::FontUnitOverflow,
 				                "logical metafile component does not fit in font units", index);
 			parsed.Visual.Components.push_back(component);
